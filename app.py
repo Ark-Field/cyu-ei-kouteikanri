@@ -20,27 +20,14 @@ else:
 
 APP_ID = 34  # @ポケット対象アプリID
 
-# 3. APIデータ取得関数（新着順ソート＆期間フィルタリング対応）
+# 3. APIデータ取得 ＆ 日付正規化付き期間フィルタリング関数
 def fetch_pocket_records(start_date=None, end_date=None):
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
     headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
     
-    # 💡 新しい順（降順）に取得するためのリクエストボディ（Pleasanter API仕様）
-    # Id または 受注番号(field-2) の降順、あるいは View でソートを指定
-    payload = {
-        "View": {
-            "ColumnSorter": "Descending",
-            "ColumnName": "UpdatedTime"  # または "IssueId" や "Creator" など、新しいものが上に来る項目
-        }
-    }
-    
     try:
-        # POSTリクエストでソート条件を送信して取得を試みる
-        response = requests.post(url, headers=headers, json=payload, timeout=20)
-        
-        if response.status_code != 200:
-            # 失敗した場合はGETでフォールバック
-            response = requests.get(url, headers=headers, timeout=20)
+        # まずGETリクエストでデータを取得
+        response = requests.get(url, headers=headers, timeout=20)
         
         if response.status_code == 200:
             result = response.json()
@@ -58,16 +45,24 @@ def fetch_pocket_records(start_date=None, end_date=None):
                 rec_body["_accessEditUrl"] = item.get("accessEditUrl", "")
                 parsed_records.append(rec_body)
             
-            # Python側で期間フィルタリング
+            # 受注日（field-1）による堅牢な期間フィルタリング
             if start_date and end_date and parsed_records:
                 filtered_records = []
                 start_str = start_date.strftime("%Y-%m-%d")
                 end_str = end_date.strftime("%Y-%m-%d")
                 
                 for r in parsed_records:
-                    r_date = str(r.get("field-1", ""))[:10]
-                    if r_date and (start_str <= r_date <= end_str):
+                    raw_date_str = str(r.get("field-1", ""))
+                    if not raw_date_str or raw_date_str.lower() == "nan" or raw_date_str.lower() == "none":
+                        continue
+                    
+                    # 💡 日付の正規化処理（スラッシュをハイフンに置換し、YYYY-MM-DD形式に統一）
+                    r_date = raw_date_str.replace("/", "-")[:10]
+                    
+                    # 形式が合致しているか簡易チェックして比較
+                    if len(r_date) == 10 and (start_str <= r_date <= end_str):
                         filtered_records.append(r)
+                
                 return filtered_records
             
             return parsed_records
@@ -89,13 +84,13 @@ tab1, tab2, tab3 = st.tabs([
 # タブ1：受注日検索 ＆ 一覧エディタ編集
 # ==========================================
 with tab1:
-    st.header("📋 受注データ一覧（新着順取得 ＆ 受注日期間検索）")
+    st.header("📋 受注データ一覧（受注日 `field-1` 期間検索）")
     
-    # 初期値：2026年10月
+    # デフォルトの検索範囲（例: 2026年10月1日 〜 10月31日）
     default_start = datetime(2026, 10, 1).date()
     default_end = datetime(2026, 10, 31).date()
     
-    st.write("🔍 **新着順でデータを取得し、指定した受注日期間で絞り込みます**")
+    st.write("🔍 **受注日の期間を指定し、「検索実行」ボタンを押すと該当データを取得します**")
     
     c1, c2, c3 = st.columns([2, 2, 1])
     with c1:
@@ -107,15 +102,16 @@ with tab1:
         st.write("")
         search_clicked = st.button("🔄 検索実行", type="primary", key="btn_s1")
 
+    # 検索ボタンが押されたときのみAPIを実行
     if search_clicked:
-        with st.spinner("@ポケットから新着データを取得・絞り込み中..."):
+        with st.spinner("@ポケットからデータを取得・受注日で絞り込み中..."):
             st.session_state["api_records"] = fetch_pocket_records(t1_start, t1_end)
 
     api_records = st.session_state.get("api_records", None)
     
     if api_records is not None:
         if api_records:
-            st.success(f"✨ 条件に合致するレコード **{len(api_records)} 件** を取得しました！")
+            st.success(f"✨ 受注日が条件に合致するレコード **{len(api_records)} 件** を取得しました。下の表で一覧確認・選択が可能です。")
             
             summary_data = []
             for idx, r in enumerate(api_records):
@@ -154,7 +150,7 @@ with tab1:
                 st.caption("ℹ️ 表の「選択」チェックボックスにチェックを入れると、下の詳細・明細・PDF発行対象を切り替えられます。（現在は先頭行を選択中）")
                 
         else:
-            st.warning("⚠️ 指定した受注日の範囲に該当するレコードがありませんでした。")
+            st.warning("⚠️ 指定した受注日の範囲に該当するレコードがありませんでした。日付範囲を広げて再確認してください。")
             sample_rec = {}
     else:
         st.info("ℹ️ 上の「検索実行」ボタンを押すとデータが読み込まれます。")
