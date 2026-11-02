@@ -8,42 +8,36 @@ from datetime import datetime, timedelta
 
 # 1. ページ基本設定
 st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @ポケット連動 受注・工程・納品・請求管理システム")
+st.title("📊 @ポケット連動 受注・工程・納品・請求管理システム（実データ接続版）")
 
-# 2. 【安全なSecrets取得処理】
+# 2. 【Secrets優先 ＆ フォールバック設定】
 if "pocket" in st.secrets:
-    POCKET_API_KEY = st.secrets["pocket"].get("api_key", "")
+    POCKET_API_KEY = st.secrets["pocket"].get("api_key", "XZtsg3OrDFOh0VayOI83j84Oc3YIzm7oujbI0T08")
     POCKET_BASE_URL = st.secrets["pocket"].get("base_url", "https://app070.at-pocket.com/arkf05_bb")
 else:
-    POCKET_API_KEY = "ここにAPIキーを設定してください"
+    POCKET_API_KEY = "XZtsg3OrDFOh0VayOI83j84Oc3YIzm7oujbI0T08"
     POCKET_BASE_URL = "https://app070.at-pocket.com/arkf05_bb"
 
 APP_ID = 34  # @ポケット対象アプリID
 
-# 3. 【エンコードエラー対策済み】@ポケット APIデータ取得関数
+# 3. @ポケット APIデータ取得関数（GETリクエスト ＆ X-At-Pocket-API-Key）
 def fetch_pocket_records(start_date=None, end_date=None):
-    """
-    日本語クエリによるlatin-1エンコードエラーを防ぎつつ、
-    @ポケットからデータを取得してPython側で安全に期間絞り込みを行う関数
-    """
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
     headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
     
     try:
         response = requests.get(url, headers=headers, timeout=15)
-
+        
         if response.status_code == 200:
             result = response.json()
-            
-            # レスポンスの構造に合わせてデータをリストとして取得
             records = []
             if isinstance(result, list):
                 records = result
             elif isinstance(result, dict):
                 records = result.get("Data", result.get("Records", []))
             
-            # 取得できたデータが無い場合は安全なテスト用モックを返す
             if not records:
+                st.info("ℹ️ @pocketからデータが取得できましたが、レコードが0件です。")
                 return get_mock_records()
 
             # 受注日（field-1）による安全な期間フィルタリング
@@ -54,7 +48,6 @@ def fetch_pocket_records(start_date=None, end_date=None):
                 
                 for r in records:
                     r_date = str(r.get("field-1", r.get("CreationTime", "")))[:10]
-                    # 日付が空、または指定期間内のものを抽出
                     if not r_date or (start_str <= r_date <= end_str):
                         filtered_records.append(r)
                 
@@ -62,17 +55,18 @@ def fetch_pocket_records(start_date=None, end_date=None):
             
             return records
         else:
-            st.warning(f"⚠️ APIステータスコード: {response.status_code} (テストデータで動作します)")
+            st.error(f"❌ APIエラー (ステータスコード: {response.status_code}): {response.text}")
             return get_mock_records()
+            
     except Exception as e:
-        st.info("ℹ️ 通信環境またはAPI未接続のため、テストデータで動作します。")
+        st.error(f"🚨 通信例外エラー: {e}")
         return get_mock_records()
 
 def get_mock_records():
-    """ オフライン時やデータゼロ時のフォールバック用モックデータ """
+    """ 通信エラー時やデータゼロ時のフォールバック用モックデータ """
     today_str = str(datetime.now().date())
     return [{
-        "Title": "ORD-2026-001",
+        "Title": "ORD-2026-001 (テストデータ)",
         "field-1": today_str,
         "field-8": "〇〇出版",
         "field-13": "はじめてのPythonプログラミング",
