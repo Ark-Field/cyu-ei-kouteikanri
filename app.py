@@ -336,7 +336,7 @@ with tab1:
                         }
                     })
 
-                # 3. field-89 の構築（💡 エラーになる無効な field-89_5, field-89_6 を除外）
+                # 3. field-89 の構築
                 orig_sub_89 = original_rec.get("field-89", [])
                 sub89_list = []
                 if isinstance(orig_sub_89, list) and len(orig_sub_89) > 0:
@@ -346,7 +346,6 @@ with tab1:
                     rec_dict["field-89_1"] = str(row_90["売上日"]) if pd.notna(row_90["売上日"]) else ""
                     rec_dict["field-89_3"] = str(int(row_90["請求数量"])) if str(row_90["請求数量"]).isdigit() else "0"
                     
-                    # 💡 無効フィールドの削除
                     rec_dict.pop("field-89_5", None)
                     rec_dict.pop("field-89_6", None)
                     
@@ -371,9 +370,6 @@ with tab1:
                     "apiVersion": 1.1,
                     "record": record_payload
                 }
-                
-                with st.expander(f"📤 【確認】レコードID {record_id} の送信ペイロード"):
-                    st.json(payload)
 
                 try:
                     res = requests.put(update_url, headers=headers, json=payload, timeout=15)
@@ -396,29 +392,105 @@ with tab1:
 # ==========================================
 with tab2:
     st.header("📦 納品書発行")
-    default_deliv = sample_rec.get("field-88", [{"納品日": "", "納品数": 0}]) if 'sample_rec' in locals() else [{"納品日": "", "納品数": 0}]
-    edited_deliv = st.data_editor(pd.DataFrame(default_deliv) if default_deliv else pd.DataFrame([{"納品日": "", "納品数": 0}]), num_rows="dynamic", key="editor_deliv", use_container_width=True)
+    st.info("💡 選択中の受注データの納品情報を確認し、印刷用プレビュー（PDF出力対応）を表示します。")
     
-    if st.button("🚀 選択中レコードの納品書PDFを生成する", type="primary", key="btn_pdf_deliv"):
+    # 生データの取得から納品日・納品数をきれいに取り出して表示
+    raw_deliv_list = sample_rec.get("field-88", []) if 'sample_rec' in locals() else []
+    deliv_table_data = []
+    
+    if raw_deliv_list:
+        for item in raw_deliv_list:
+            rec = item.get("record", item) if isinstance(item, dict) else {}
+            deliv_table_data.append({
+                "納品日": parse_date_safe(rec.get("field-88_2")),
+                "品名": rec.get("field-88_3", "本書"),
+                "納品数": rec.get("field-88_4", "0")
+            })
+    else:
+        deliv_table_data = [{"納品日": None, "品名": "本書", "納品数": "0"}]
+    
+    df_deliv = pd.DataFrame(deliv_table_data)
+    edited_deliv = st.data_editor(
+        df_deliv,
+        num_rows="dynamic",
+        key="editor_deliv_clean",
+        use_container_width=True,
+        column_config={
+            "納品日": st.column_config.DateColumn("納品日", format="YYYY-MM-DD"),
+            "品名": st.column_config.TextColumn("品名"),
+            "納品数": st.column_config.TextColumn("納品数")
+        }
+    )
+    
+    if st.button("🚀 納品書プレビュー / 印刷（PDF）を作成", type="primary", key="btn_pdf_deliv"):
         html_content = f"""
         <html>
-        <head><meta charset="utf-8"><style>body {{ font-family: sans-serif; }}</style></head>
+        <head>
+            <meta charset="utf-8">
+            <style>
+                body {{ font-family: 'Helvetica Neue', Arial, sans-serif; padding: 30px; color: #333; }}
+                h1 {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; }}
+                .meta {{ display: flex; justify-content: space-between; margin-bottom: 20px; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+                th, td {{ border: 1px solid #ddd; padding: 10px; text-align: left; }}
+                th {{ background-color: #f2f2f2; }}
+                .right {{ text-align: right; }}
+                @media print {{
+                    body {{ padding: 0; }}
+                    .no-print {{ display: none; }}
+                }}
+            </style>
+        </head>
         <body>
-            <h1>納品書</h1>
-            <p><strong>受注番号:</strong> {field_2 if 'field_2' in locals() else ''} / <strong>受注日:</strong> {field_1 if 'field_1' in locals() else ''}</p>
-            <p><strong>発行先:</strong> {field_8 if 'field_8' in locals() else ''} 御中</p>
-            <p><strong>書名:</strong> {field_13 if 'field_13' in locals() else ''} / <strong>製本数:</strong> {field_4 if 'field_4' in locals() else ''}部</p>
+            <h1>納 品 書</h1>
+            <div class="meta">
+                <div>
+                    <p><strong>宛先:</strong> {field_8 if 'field_8' in locals() else ''} 御中</p>
+                    <p><strong>受注番号:</strong> {field_2 if 'field_2' in locals() else ''} / <strong>受注日:</strong> {field_1 if 'field_1' in locals() else ''}</p>
+                </div>
+                <div>
+                    <p><strong>発行日:</strong> {datetime.now().strftime('%Y-%m-%d')}</p>
+                </div>
+            </div>
+            <p>下記のとおり納品いたしました。</p>
+            <table>
+                <tr>
+                    <th>納品日</th>
+                    <th>品名 (書名)</th>
+                    <th class="right">納品数</th>
+                </tr>
+        """
+        for _, row in edited_deliv.iterrows():
+            d_date = str(row["納品日"]) if pd.notna(row["納品日"]) else ""
+            d_name = f"{field_13} ({row['品名']})" if 'field_13' in locals() else row['品名']
+            d_qty = row["納品数"]
+            html_content += f"""
+                <tr>
+                    <td>{d_date}</td>
+                    <td>{d_name}</td>
+                    <td class="right">{d_qty} 部</td>
+                </tr>
+            """
+        html_content += f"""
+            </table>
+            <br><br>
+            <div class="no-print" style="text-align: center; margin-top: 30px;">
+                <button onclick="window.print();" style="padding: 10px 20px; font-size: 16px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ この納品書を印刷 / PDF保存する</button>
+            </div>
         </body>
         </html>
         """
-        st.success("納品書PDFの準備ができました！")
-        st.download_button("📥 納品書PDFをダウンロード", data=html_content.encode("utf-8"), file_name=f"納品書_{field_2 if 'field_2' in locals() else 'd'}.html", mime="text/html")
+        st.success("納品書が生成されました！下のボタン、またはプレビュー内の印刷ボタンをご利用ください。")
+        st.components.v1.html(html_content, height=500, scrolling=True)
+        st.download_button("📥 納品書HTMLファイルをダウンロード", data=html_content.encode("utf-8"), file_name=f"納品書_{field_2 if 'field_2' in locals() else 'd'}.html", mime="text/html")
 
 # ==========================================
 # タブ3：請求書発行（口座UI付き）
 # ==========================================
 with tab3:
     st.header("📄 請求書発行（口座UI付き）")
+    st.info("💡 振込先口座情報を入力し、請求明細を確認してプレビュー・印刷（PDF化）を行えます。")
+    
     bc1, bc2, bc3 = st.columns(3)
     with bc1:
         bank_name = st.text_input("銀行名", value="千葉銀行", key="b_name")
@@ -429,32 +501,119 @@ with tab3:
     with bc3:
         bank_holder = st.text_input("口座名義", value="カ）アークフィールド", key="b_holder")
 
-    default_sales = sample_rec.get("field-89", [{"売上日": "", "請求数量": 0}]) if 'sample_rec' in locals() else [{"売上日": "", "請求数量": 0}]
-    edited_sales = st.data_editor(pd.DataFrame(default_sales) if default_sales else pd.DataFrame([{"売上日": "", "請求数量": 0}]), num_rows="dynamic", key="editor_sales", use_container_width=True)
+    raw_sales_list = sample_rec.get("field-89", []) if 'sample_rec' in locals() else []
+    sales_table_data = []
     
-    if st.button("🚀 振込先口座付き請求書PDFを生成する", type="primary", key="btn_pdf_invoice"):
+    if raw_sales_list:
+        for item in raw_sales_list:
+            rec = item.get("record", item) if isinstance(item, dict) else {}
+            sales_table_data.append({
+                "売上日": parse_date_safe(rec.get("field-89_1")),
+                "請求数量": rec.get("field-89_3", "0")
+            })
+    else:
+        sales_table_data = [{"売上日": None, "請求数量": "0"}]
+        
+    df_sales = pd.DataFrame(sales_table_data)
+    edited_sales = st.data_editor(
+        df_sales,
+        num_rows="dynamic",
+        key="editor_sales_clean",
+        use_container_width=True,
+        column_config={
+            "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
+            "請求数量": st.column_config.TextColumn("請求数量")
+        }
+    )
+    
+    if st.button("🚀 請求書プレビュー / 印刷（PDF）を作成", type="primary", key="btn_pdf_invoice"):
         try:
-            total_amount = float(field_4) * float(field_5) if 'field_4' in locals() and 'field_5' in locals() and field_4 and field_5 else 0
+            unit_price = float(field_5) if 'field_5' in locals() and field_5 and str(field_5).replace('.','',1).isdigit() else 0
         except ValueError:
-            total_amount = 0
+            unit_price = 0
+            
+        total_qty = 0
+        for _, row in edited_sales.iterrows():
+            q_str = str(row["請求数量"])
+            if q_str.isdigit():
+                total_qty += int(q_str)
+                
+        total_amount = total_qty * unit_price
             
         inv_html = f"""
         <html>
-        <head><meta charset="utf-8"><style>body {{ font-family: sans-serif; }} .box {{ border: 1px solid #000; padding: 10px; }}</style></head>
+        <head>
+            <meta charset="utf-8">
+            <style>
+                body {{ font-family: 'Helvetica Neue', Arial, sans-serif; padding: 30px; color: #333; }}
+                h1 {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; }}
+                .meta {{ display: flex; justify-content: space-between; margin-bottom: 20px; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+                th, td {{ border: 1px solid #ddd; padding: 10px; text-align: left; }}
+                th {{ background-color: #f2f2f2; }}
+                .right {{ text-align: right; }}
+                .box {{ border: 1px solid #333; padding: 15px; margin-top: 20px; background-color: #f9f9f9; width: 350px; }}
+                @media print {{
+                    body {{ padding: 0; }}
+                    .no-print {{ display: none; }}
+                }}
+            </style>
+        </head>
         <body>
-            <h1>請求書</h1>
-            <p><strong>宛先:</strong> {field_8 if 'field_8' in locals() else ''} 御中</p>
-            <p><strong>件名 (書名):</strong> {field_13 if 'field_13' in locals() else ''} (受注番号: {field_2 if 'field_2' in locals() else ''} / 受注日: {field_1 if 'field_1' in locals() else ''})</p>
-            <hr>
-            <p>請求金額: <strong>¥{total_amount:,.2f}</strong> (税込)</p>
-            <p>単価: ¥{field_5 if 'field_5' in locals() else ''} × 製本数: {field_4 if 'field_4' in locals() else ''}</p>
+            <h1>請 求 書</h1>
+            <div class="meta">
+                <div>
+                    <p><strong>宛先:</strong> {field_8 if 'field_8' in locals() else ''} 御中</p>
+                    <p><strong>件名 (書名):</strong> {field_13 if 'field_13' in locals() else ''}</p>
+                    <p><strong>受注番号:</strong> {field_2 if 'field_2' in locals() else ''} / <strong>受注日:</strong> {field_1 if 'field_1' in locals() else ''}</p>
+                </div>
+                <div>
+                    <p><strong>発行日:</strong> {datetime.now().strftime('%Y-%m-%d')}</p>
+                </div>
+            </div>
+            
+            <table>
+                <tr>
+                    <th>売上日 / 対象</th>
+                    <th class="right">請求数量</th>
+                    <th class="right">単価</th>
+                    <th class="right">金額</th>
+                </tr>
+        """
+        for _, row in edited_sales.iterrows():
+            s_date = str(row["売上日"]) if pd.notna(row["売上日"]) else ""
+            s_qty = row["請求数量"]
+            try:
+                q_num = int(s_qty) if str(s_qty).isdigit() else 0
+            except ValueError:
+                q_num = 0
+            sub_total = q_num * unit_price
+            inv_html += f"""
+                <tr>
+                    <td>{s_date} 分売上</td>
+                    <td class="right">{q_num} 部</td>
+                    <td class="right">¥{unit_price:,.2f}</td>
+                    <td class="right">¥{sub_total:,.2f}</td>
+                </tr>
+            """
+        inv_html += f"""
+            </table>
+            
+            <h2 style="text-align: right; margin-top: 20px;">ご請求金額合計: ￥{total_amount:,.2f} (税込)</h2>
+            
             <div class="box">
-                <strong>【お振込先】</strong><br>
+                <strong>【お振込先口座】</strong><br>
                 {bank_name} {bank_branch} ({bank_type}) {bank_account}<br>
                 口座名義: {bank_holder}
+            </div>
+            
+            <br>
+            <div class="no-print" style="text-align: center; margin-top: 20px;">
+                <button onclick="window.print();" style="padding: 10px 20px; font-size: 16px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ この請求書を印刷 / PDF保存する</button>
             </div>
         </body>
         </html>
         """
-        st.success("請求書PDFの準備ができました！")
-        st.download_button("📥 請求書PDFをダウンロード", data=inv_html.encode("utf-8"), file_name=f"請求書_{field_2 if 'field_2' in locals() else 'i'}.html", mime="text/html")
+        st.success("請求書が生成されました！画面上のプレビュー、または印刷ボタンからPDFとして保存できます。")
+        st.components.v1.html(inv_html, height=600, scrolling=True)
+        st.download_button("📥 請求書HTMLファイルをダウンロード", data=inv_html.encode("utf-8"), file_name=f"請求書_{field_2 if 'field_2' in locals() else 'i'}.html", mime="text/html")
