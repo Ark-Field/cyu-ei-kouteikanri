@@ -9,8 +9,8 @@ import streamlit as st
 # ==========================================
 # 1. ページ基本設定
 # ==========================================
-st.set_page_config(page_title="受注・進捗・帳票管理システム", layout="wide")
-st.title("📊 @pocket連動 受注進捗・日付更新管理システム")
+st.set_page_config(page_title="受注・進捗・帳票管理システム (デバッグ版)", layout="wide")
+st.title("📊 @pocket連動 受注進捗・日付更新管理システム 【デバッグ版】")
 
 # ==========================================
 # 2. Secrets設定
@@ -101,8 +101,8 @@ tab1, tab2, tab3 = st.tabs([
 # タブ1：進捗・日付更新エディタ
 # ==========================================
 with tab1:
-    st.header("📋 受注進捗・日付更新管理エディタ")
-    st.info("💡 既存の受注データに対して、**配本日・折本日・無線日・仕上日・納品日・売上日**などの進捗日付を安全に入力・更新する専用画面です。")
+    st.header("📋 受注進捗・日付更新管理エディタ 【デバッグモード】")
+    st.info("💡 検索を実行すると、下のエリアに取得したデータの**生JSON（構造）**が表示されます。明細IDやフィールド名を確認できます。")
     
     default_start = datetime(2026, 10, 1).date()
     default_end = datetime(2026, 10, 31).date()
@@ -126,6 +126,11 @@ with tab1:
     if api_records is not None:
         if api_records:
             st.success(f"✨ 親レコード **{len(api_records)} 件** を取得しました。")
+            
+            # 🔍 デバッグ用：取得した最初のレコードの生JSON構造をそのまま表示
+            with st.expander("🔍 【デバッグ】@pocketから取得した1件目の生JSONデータ構造を確認する", expanded=True):
+                st.write("▼ 以下の構造の中に `field-90`, `field-88`, `field-89` の中身とそれぞれの `Id` がどう格納されているか確認できます。")
+                st.json(api_records[0])
             
             flat_data = []
             for record_idx, r in enumerate(api_records):
@@ -282,7 +287,6 @@ with tab1:
                 sub89_list = []
                 
                 for _, row in group_df.iterrows():
-                    # 💡 1. 配本・工程明細（既存の明細レコードIDがある場合は必ず "Id" を持たせる）
                     item_90 = {}
                     if row.get("_id_90") and str(row["_id_90"]).strip() not in ["", "nan", "None"]:
                         item_90["Id"] = row["_id_90"]
@@ -297,7 +301,6 @@ with tab1:
                     })
                     sub90_list.append(item_90)
                     
-                    # 💡 2. 納品明細（既存の明細レコードIDがある場合は必ず "Id" を持たせる）
                     item_88 = {}
                     if row.get("_id_88") and str(row["_id_88"]).strip() not in ["", "nan", "None"]:
                         item_88["Id"] = row["_id_88"]
@@ -307,7 +310,6 @@ with tab1:
                     })
                     sub88_list.append(item_88)
                         
-                    # 💡 3. 売上明細（既存の明細レコードIDがある場合は必ず "Id" を持たせる）
                     item_89 = {}
                     if row.get("_id_89") and str(row["_id_89"]).strip() not in ["", "nan", "None"]:
                         item_89["Id"] = row["_id_89"]
@@ -326,6 +328,10 @@ with tab1:
                     "record": record_payload
                 }
                 
+                # 🔍 デバッグ用：送信するJSONペイロードを画面上に表示（エラー発生時の確認用）
+                with st.expander(f"📤 【デバッグ】レコードID {record_id} の送信ペイロード確認"):
+                    st.json(payload)
+
                 try:
                     res = requests.put(update_url, headers=headers, json=payload, timeout=15)
                     if res.status_code in [200, 204]:
@@ -408,4 +414,4 @@ with tab3:
         </html>
         """
         st.success("請求書PDFの準備ができました！")
-        st.download_button("📥 請求書PDFをダウンロード", data=inv_html.encode("utf-8"), file_name=f"請求書_{field_2 if 'field_2' in locals() else 'i'}.html", mime="text/html")
+        st.download_button("📥 請求書PDFをダウンロード", data=html_content.encode("utf-8"), file_name=f"請求書_{field_2 if 'field_2' in locals() else 'i'}.html", mime="text/html")
