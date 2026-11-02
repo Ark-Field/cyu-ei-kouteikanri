@@ -20,7 +20,7 @@ else:
 
 APP_ID = 34  # @ポケット対象アプリID
 
-# 3. APIデータ取得関数（安全クラッシュ防止版）
+# 3. APIデータ取得関数（'records' キー対応版）
 def fetch_pocket_records():
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
     headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
@@ -32,29 +32,18 @@ def fetch_pocket_records():
         if response.status_code == 200:
             result = response.json()
             
-            # データの形式を確認するため、型とキーだけ安全に出力
+            raw_items = []
             if isinstance(result, list):
-                st.write(f"ℹ️ 受信データはリスト形式です（件数: {len(result)}）")
                 raw_items = result
             elif isinstance(result, dict):
-                st.write(f"ℹ️ 受信データは辞書形式です。キー一覧: {list(result.keys())}")
-                # 代表的なキーを探索
-                raw_items = []
-                for k in ["Data", "Records", "Response", "Values", "Items", "Rows"]:
-                    if k in result and isinstance(result[k], list):
-                        raw_items = result[k]
-                        st.write(f"✅ キー '{k}' から {len(raw_items)} 件のリストを抽出しました。")
-                        break
-                if not raw_items:
-                    # 辞書自体が1つのレコードの可能性
-                    raw_items = [result]
-            else:
-                raw_items = []
-
+                # 判明した 'records' キーからデータを取得
+                raw_items = result.get("records", result.get("Data", result.get("Records", [])))
+            
             parsed_records = []
             for item in raw_items:
                 if not isinstance(item, dict):
                     continue
+                # recordオブジェクト内、またはアイテム自体からフィールドを取得
                 rec_body = item.get("record", {})
                 if not rec_body:
                     rec_body = item
@@ -67,7 +56,7 @@ def fetch_pocket_records():
                 st.success(f"✨ 有効なレコードを {len(parsed_records)} 件読み込みました！")
                 return parsed_records
             else:
-                st.warning("⚠️ パース後のレコードが抽出できませんでした。")
+                st.warning("⚠️ 'records' キーはありましたが、中のリストが空かパースできませんでした。")
         else:
             st.error(f"❌ APIエラー: {response.text}")
     except Exception as e:
@@ -215,4 +204,4 @@ with tab3:
         </html>
         """
         st.success("請求書PDFの準備ができました！")
-        st.download_button("📥 請求書PDFをダウンロード", data=html_content.encode("utf-8"), file_name=f"請求書_{field_2}.html", mime="text/html")
+        st.download_button("📥 請求書PDFをダウンロード", data=inv_html.encode("utf-8"), file_name=f"請求書_{field_2}.html", mime="text/html")
