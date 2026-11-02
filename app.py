@@ -6,11 +6,15 @@ import pandas as pd
 from datetime import datetime, timedelta, date
 import streamlit as st
 
+# ==========================================
 # 1. ページ基本設定
-st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（明細常時同期版）")
+# ==========================================
+st.set_page_config(page_title="受注・進捗・帳票管理システム", layout="wide")
+st.title("📊 @pocket連動 受注進捗・日付更新管理システム")
 
+# ==========================================
 # 2. Secrets設定
+# ==========================================
 if "pocket" in st.secrets:
     POCKET_API_KEY = st.secrets["pocket"].get("api_key", "XZtsg3OrDFOh0VayOI83j84Oc3YIzm7oujbI0T08")
     POCKET_BASE_URL = st.secrets["pocket"].get("base_url", "https://app070.at-pocket.com/arkf05_bb")
@@ -20,7 +24,9 @@ else:
 
 APP_ID = 34  # @pocket対象アプリID
 
+# ==========================================
 # 3. APIデータ取得関数
+# ==========================================
 def fetch_pocket_records(start_date=None, end_date=None):
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
     headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
@@ -74,13 +80,6 @@ def fetch_pocket_records(start_date=None, end_date=None):
     
     return []
 
-# 4. タブ構成の定義
-tab1, tab2, tab3 = st.tabs([
-    "📋 タブ1: 受注・明細フラット一覧エディタ", 
-    "📦 タブ2: 納品書発行", 
-    "📄 タブ3: 請求書発行（口座UI付き）"
-])
-
 def parse_date_safe(val):
     if not val or str(val).lower() in ["nan", "none", ""]:
         return None
@@ -90,15 +89,23 @@ def parse_date_safe(val):
         return None
 
 # ==========================================
-# タブ1：受注・明細フラット一覧エディタ
+# 4. タブ構成の定義
+# ==========================================
+tab1, tab2, tab3 = st.tabs([
+    "📋 タブ1: 進捗・日付更新エディタ", 
+    "📦 タブ2: 納品書発行", 
+    "📄 タブ3: 請求書発行（口座UI付き）"
+])
+
+# ==========================================
+# タブ1：進捗・日付更新エディタ
 # ==========================================
 with tab1:
-    st.header("📋 受注・明細フラット一覧 ＆ 直接編集エディタ")
+    st.header("📋 受注進捗・日付更新管理エディタ")
+    st.info("💡 日々進行する工程や納品・売上の日付を、空欄があってもそのまま安全に更新できます。")
     
     default_start = datetime(2026, 10, 1).date()
     default_end = datetime(2026, 10, 31).date()
-    
-    st.write("🔍 **期間を指定して納品・工程データを確認し、チェックを入れて上書き保存できます。**")
     
     c1, c2, c3 = st.columns([2, 2, 1])
     with c1:
@@ -183,17 +190,17 @@ with tab1:
                 key="grid_flat_main",
                 use_container_width=True,
                 column_config={
-                    "更新": st.column_config.CheckboxColumn("上書き更新", required=True, help="チェックを入れた行のみ@pocketに保存します"),
+                    "更新": st.column_config.CheckboxColumn("更新チェック", required=True, help="チェックを入れた行の受注データを@pocketに上書き保存します"),
                     "_record_idx": None,
                     "_id_90": None,
                     "_id_88": None,
                     "_id_89": None,
-                    "受注番号": st.column_config.TextColumn("受注番号"),
-                    "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD"),
+                    "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
+                    "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD", disabled=True),
                     "出版社名": st.column_config.TextColumn("出版社名", disabled=True),
                     "書名": st.column_config.TextColumn("書名", disabled=True),
-                    "製本数": st.column_config.TextColumn("製本数"),
-                    "単価": st.column_config.TextColumn("単価"),
+                    "製本数": st.column_config.TextColumn("製本数", disabled=True),
+                    "単価": st.column_config.TextColumn("単価", disabled=True),
                     "配本日": st.column_config.DateColumn("配本日", format="YYYY-MM-DD"),
                     "折本日": st.column_config.DateColumn("折本日", format="YYYY-MM-DD"),
                     "無線日": st.column_config.DateColumn("無線日", format="YYYY-MM-DD"),
@@ -228,16 +235,17 @@ with tab1:
             sample_rec = {}
             field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
     else:
-        st.info("ℹ️ 上のアプリ設定を確認し「検索実行」ボタンを押すとデータが読み込まれます。")
+        st.info("ℹ️ 上の検索条件を指定し「検索実行」ボタンを押すとデータが読み込まれます。")
         sample_rec = {}
         field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
 
     st.divider()
     
-    if st.button("💾 チェックを入れた行のみ @pocket に上書き保存する", type="primary", key="btn_save_checked"):
+    checked_rows_count = len(edited_flat_df[edited_flat_df["更新"] == True]) if 'edited_flat_df' in locals() else 0
+    if st.button(f"💾 チェックを入れた受注データ（{checked_rows_count}件）を @pocket に一括上書き保存する", type="primary", key="btn_save_checked"):
         checked_rows = edited_flat_df[edited_flat_df["更新"] == True]
         if checked_rows.empty:
-            st.warning("⚠️ 上書き保存する行の「上書き更新」チェックボックスにチェックを入れてください。")
+            st.warning("⚠️ 上書き保存する行の「更新チェック」ボックスにチェックを入れてください。")
         else:
             headers = {
                 "X-At-Pocket-API-Key": POCKET_API_KEY, 
@@ -247,8 +255,10 @@ with tab1:
             success_count = 0
             fail_count = 0
             
-            for _, row in checked_rows.iterrows():
-                r_idx = int(row["_record_idx"])
+            grouped_records = checked_rows.groupby("_record_idx")
+            
+            for r_idx, group_df in grouped_records:
+                r_idx = int(r_idx)
                 original_rec = api_records[r_idx]
                 record_id = original_rec.get("_recordId")
                 
@@ -259,51 +269,63 @@ with tab1:
                 
                 update_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records/{record_id}"
                 
-                # 親レコードのフィールド構築
+                first_row = group_df.iloc[0]
                 record_payload = {
-                    "field-2": str(row["受注番号"]),
-                    "field-1": str(row["受注日"]) if pd.notna(row["受注日"]) else "",
-                    "field-4": str(row["製本数"]),
-                    "field-5": str(row["単価"]),
+                    "field-2": str(first_row["受注番号"]),
+                    "field-1": str(first_row["受注日"]) if pd.notna(first_row["受注日"]) else "",
+                    "field-4": str(first_row["製本数"]),
+                    "field-5": str(first_row["単価"]),
                 }
                 
-                # 💡 明細1 (field-90: 工程・配本等) の構築（既存IDがあるか、データが入力されている場合のみ含める）
-                if (row["_id_90"] and str(row["_id_90"]).strip() not in ["", "nan", "None"]) or pd.notna(row["配本日"]):
-                    sub90_item = {}
-                    if row["_id_90"] and str(row["_id_90"]).strip() not in ["", "nan", "None"]:
-                        sub90_item["Id"] = row["_id_90"]
-                    sub90_item.update({
-                        "field-90_1": str(row["配本日"]) if pd.notna(row["配本日"]) else "",
-                        "field-90_3": str(row["折本日"]) if pd.notna(row["折本日"]) else "",
-                        "field-90_4": str(row["無線日"]) if pd.notna(row["無線日"]) else "",
-                        "field-90_5": str(row["三方日"]) if pd.notna(row["三方日"]) else "",
-                        "field-90_6": str(row["仕上日"]) if pd.notna(row["仕上日"]) else "",
-                        "field-90_7": bool(row["チェック"]),
-                        "field-90_9": str(row["備考"]) if pd.notna(row["備考"]) else ""
-                    })
-                    record_payload["field-90"] = [sub90_item]
+                sub90_list = []
+                sub88_list = []
+                sub89_list = []
+                
+                for _, row in group_df.iterrows():
+                    # 💡 配本・工程明細（既存IDがあれば空欄があっても必ず枠を維持して送信）
+                    if (row["_id_90"] and str(row["_id_90"]).strip() not in ["", "nan", "None"]) or pd.notna(row["配本日"]) or pd.notna(row["折本日"]) or pd.notna(row["無線日"]) or pd.notna(row["三方日"]) or pd.notna(row["仕上日"]) or str(row["備考"]).strip() != "":
+                        item_90 = {}
+                        if row["_id_90"] and str(row["_id_90"]).strip() not in ["", "nan", "None"]:
+                            item_90["Id"] = row["_id_90"]
+                        item_90.update({
+                            "field-90_1": str(row["配本日"]) if pd.notna(row["配本日"]) else "",
+                            "field-90_3": str(row["折本日"]) if pd.notna(row["折本日"]) else "",
+                            "field-90_4": str(row["無線日"]) if pd.notna(row["無線日"]) else "",
+                            "field-90_5": str(row["三方日"]) if pd.notna(row["三方日"]) else "",
+                            "field-90_6": str(row["仕上日"]) if pd.notna(row["仕上日"]) else "",
+                            "field-90_7": bool(row["チェック"]),
+                            "field-90_9": str(row["備考"]) if pd.notna(row["備考"]) else ""
+                        })
+                        sub90_list.append(item_90)
+                    
+                    # 💡 納品明細
+                    if (row["_id_88"] and str(row["_id_88"]).strip() not in ["", "nan", "None"]) or pd.notna(row["納品日"]) or str(row["納品数"]).strip() != "":
+                        item_88 = {}
+                        if row["_id_88"] and str(row["_id_88"]).strip() not in ["", "nan", "None"]:
+                            item_88["Id"] = row["_id_88"]
+                        item_88.update({
+                            "field-88_2": str(row["納品日"]) if pd.notna(row["納品日"]) else "",
+                            "field-88_4": int(row["納品数"]) if str(row["納品数"]).isdigit() else 0
+                        })
+                        sub88_list.append(item_88)
+                        
+                    # 💡 売上明細
+                    if (row["_id_89"] and str(row["_id_89"]).strip() not in ["", "nan", "None"]) or pd.notna(row["売上日"]) or str(row["請求数量"]).strip() != "":
+                        item_89 = {}
+                        if row["_id_89"] and str(row["_id_89"]).strip() not in ["", "nan", "None"]:
+                            item_89["Id"] = row["_id_89"]
+                        item_89.update({
+                            "field-89_1": str(row["売上日"]) if pd.notna(row["売上日"]) else "",
+                            "field-89_3": int(row["請求数量"]) if str(row["請求数量"]).isdigit() else 0
+                        })
+                        sub89_list.append(item_89)
 
-                # 💡 明細2 (field-88: 納品) の構築
-                if (row["_id_88"] and str(row["_id_88"]).strip() not in ["", "nan", "None"]) or pd.notna(row["納品日"]):
-                    sub88_item = {}
-                    if row["_id_88"] and str(row["_id_88"]).strip() not in ["", "nan", "None"]:
-                        sub88_item["Id"] = row["_id_88"]
-                    sub88_item.update({
-                        "field-88_2": str(row["納品日"]) if pd.notna(row["納品日"]) else "",
-                        "field-88_4": int(row["納品数"]) if str(row["納品数"]).isdigit() else 0
-                    })
-                    record_payload["field-88"] = [sub88_item]
-
-                # 💡 明細3 (field-89: 売上) の構築
-                if (row["_id_89"] and str(row["_id_89"]).strip() not in ["", "nan", "None"]) or pd.notna(row["売上日"]):
-                    sub89_item = {}
-                    if row["_id_89"] and str(row["_id_89"]).strip() not in ["", "nan", "None"]:
-                        sub89_item["Id"] = row["_id_89"]
-                    sub89_item.update({
-                        "field-89_1": str(row["売上日"]) if pd.notna(row["売上日"]) else "",
-                        "field-89_3": int(row["請求数量"]) if str(row["請求数量"]).isdigit() else 0
-                    })
-                    record_payload["field-89"] = [sub89_item]
+                if sub90_list:
+                    record_payload["field-90"] = sub90_list
+                if sub88_list:
+                    record_payload["field-88"] = sub88_list
+                if sub89_list:
+                    record_payload["field-89"] = sub89_list
 
                 payload = {
                     "apiVersion": 1.1,
@@ -312,7 +334,7 @@ with tab1:
                 
                 try:
                     res = requests.put(update_url, headers=headers, json=payload, timeout=15)
-                    if res.status_code == 200:
+                    if res.status_code in [200, 204]:
                         success_count += 1
                     else:
                         st.error(f"❌ レコードID {record_id} の保存失敗 (ステータス {res.status_code}): {res.text}")
@@ -322,7 +344,7 @@ with tab1:
                     fail_count += 1
             
             if success_count > 0:
-                st.success(f"✅ **{success_count} 件** のデータを @pocket に正常に上書き保存しました！")
+                st.success(f"✅ **{success_count} 件** のレコードデータを @pocket に正常に一括上書き保存しました！")
             if fail_count > 0:
                 st.error(f"❌ {fail_count} 件の保存に失敗しました。")
 
@@ -331,7 +353,7 @@ with tab1:
 # ==========================================
 with tab2:
     st.header("📦 納品書発行")
-    default_deliv = sample_rec.get("field-88", [{"納品日": "", "納品数": 0}])
+    default_deliv = sample_rec.get("field-88", [{"納品日": "", "納品数": 0}]) if 'sample_rec' in locals() else [{"納品日": "", "納品数": 0}]
     edited_deliv = st.data_editor(pd.DataFrame(default_deliv) if default_deliv else pd.DataFrame([{"納品日": "", "納品数": 0}]), num_rows="dynamic", key="editor_deliv", use_container_width=True)
     
     if st.button("🚀 選択中レコードの納品書PDFを生成する", type="primary", key="btn_pdf_deliv"):
@@ -340,14 +362,14 @@ with tab2:
         <head><meta charset="utf-8"><style>body {{ font-family: sans-serif; }}</style></head>
         <body>
             <h1>納品書</h1>
-            <p><strong>受注番号:</strong> {field_2} / <strong>受注日:</strong> {field_1}</p>
-            <p><strong>発行先:</strong> {field_8} 御中</p>
-            <p><strong>書名:</strong> {field_13} / <strong>製本数:</strong> {field_4}部</p>
+            <p><strong>受注番号:</strong> {field_2 if 'field_2' in locals() else ''} / <strong>受注日:</strong> {field_1 if 'field_1' in locals() else ''}</p>
+            <p><strong>発行先:</strong> {field_8 if 'field_8' in locals() else ''} 御中</p>
+            <p><strong>書名:</strong> {field_13 if 'field_13' in locals() else ''} / <strong>製本数:</strong> {field_4 if 'field_4' in locals() else ''}部</p>
         </body>
         </html>
         """
         st.success("納品書PDFの準備ができました！")
-        st.download_button("📥 納品書PDFをダウンロード", data=html_content.encode("utf-8"), file_name=f"納品書_{field_2}.html", mime="text/html")
+        st.download_button("📥 納品書PDFをダウンロード", data=html_content.encode("utf-8"), file_name=f"納品書_{field_2 if 'field_2' in locals() else 'd'}.html", mime="text/html")
 
 # ==========================================
 # タブ3：請求書発行（口座UI付き）
@@ -364,12 +386,12 @@ with tab3:
     with bc3:
         bank_holder = st.text_input("口座名義", value="カ）アークフィールド", key="b_holder")
 
-    default_sales = sample_rec.get("field-89", [{"売上日": "", "請求数量": 0}])
+    default_sales = sample_rec.get("field-89", [{"売上日": "", "請求数量": 0}]) if 'sample_rec' in locals() else [{"売上日": "", "請求数量": 0}]
     edited_sales = st.data_editor(pd.DataFrame(default_sales) if default_sales else pd.DataFrame([{"売上日": "", "請求数量": 0}]), num_rows="dynamic", key="editor_sales", use_container_width=True)
     
     if st.button("🚀 振込先口座付き請求書PDFを生成する", type="primary", key="btn_pdf_invoice"):
         try:
-            total_amount = float(field_4) * float(field_5) if field_4 and field_5 else 0
+            total_amount = float(field_4) * float(field_5) if 'field_4' in locals() and 'field_5' in locals() and field_4 and field_5 else 0
         except ValueError:
             total_amount = 0
             
@@ -378,11 +400,11 @@ with tab3:
         <head><meta charset="utf-8"><style>body {{ font-family: sans-serif; }} .box {{ border: 1px solid #000; padding: 10px; }}</style></head>
         <body>
             <h1>請求書</h1>
-            <p><strong>宛先:</strong> {field_8} 御中</p>
-            <p><strong>件名 (書名):</strong> {field_13} (受注番号: {field_2} / 受注日: {field_1})</p>
+            <p><strong>宛先:</strong> {field_8 if 'field_8' in locals() else ''} 御中</p>
+            <p><strong>件名 (書名):</strong> {field_13 if 'field_13' in locals() else ''} (受注番号: {field_2 if 'field_2' in locals() else ''} / 受注日: {field_1 if 'field_1' in locals() else ''})</p>
             <hr>
             <p>請求金額: <strong>¥{total_amount:,.2f}</strong> (税込)</p>
-            <p>単価: ¥{field_5} × 製本数: {field_4}</p>
+            <p>単価: ¥{field_5 if 'field_5' in locals() else ''} × 製本数: {field_4 if 'field_4' in locals() else ''}</p>
             <div class="box">
                 <strong>【お振込先】</strong><br>
                 {bank_name} {bank_branch} ({bank_type}) {bank_account}<br>
@@ -392,4 +414,4 @@ with tab3:
         </html>
         """
         st.success("請求書PDFの準備ができました！")
-        st.download_button("📥 請求書PDFをダウンロード", data=inv_html.encode("utf-8"), file_name=f"請求書_{field_2}.html", mime="text/html")
+        st.download_button("📥 請求書PDFをダウンロード", data=html_content.encode("utf-8"), file_name=f"請求書_{field_2 if 'field_2' in locals() else 'i'}.html", mime="text/html")
