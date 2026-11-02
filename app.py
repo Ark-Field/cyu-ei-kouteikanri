@@ -9,8 +9,8 @@ import streamlit as st
 # ==========================================
 # 1. ページ基本設定
 # ==========================================
-st.set_page_config(page_title="受注・進捗・帳票管理システム (デバッグ版)", layout="wide")
-st.title("📊 @pocket連動 受注進捗・日付更新管理システム 【デバッグ版】")
+st.set_page_config(page_title="受注・進捗・帳票管理システム", layout="wide")
+st.title("📊 @pocket連動 受注進捗・日付更新管理システム")
 
 # ==========================================
 # 2. Secrets設定
@@ -101,8 +101,8 @@ tab1, tab2, tab3 = st.tabs([
 # タブ1：進捗・日付更新エディタ
 # ==========================================
 with tab1:
-    st.header("📋 受注進捗・日付更新管理エディタ 【デバッグモード】")
-    st.info("💡 検索を実行すると、下のエリアに取得したデータの**生JSON（構造）**が表示されます。明細IDやフィールド名を確認できます。")
+    st.header("📋 受注進捗・日付更新管理エディタ")
+    st.info("💡 既存の受注データに対して、**配本日・折本日・無線日・仕上日・納品日・売上日**などの進捗日付を安全に入力・更新する専用画面です。")
     
     default_start = datetime(2026, 10, 1).date()
     default_end = datetime(2026, 10, 31).date()
@@ -127,11 +127,6 @@ with tab1:
         if api_records:
             st.success(f"✨ 親レコード **{len(api_records)} 件** を取得しました。")
             
-            # 🔍 デバッグ用：取得した最初のレコードの生JSON構造をそのまま表示
-            with st.expander("🔍 【デバッグ】@pocketから取得した1件目の生JSONデータ構造を確認する", expanded=True):
-                st.write("▼ 以下の構造の中に `field-90`, `field-88`, `field-89` の中身とそれぞれの `Id` がどう格納されているか確認できます。")
-                st.json(api_records[0])
-            
             flat_data = []
             for record_idx, r in enumerate(api_records):
                 h_ord_no = str(r.get("field-2", ""))
@@ -150,24 +145,27 @@ with tab1:
                               len(sub_89) if isinstance(sub_89, list) else 0, 1)
                 
                 for i in range(max_len):
+                    # 💡 field-90 の取得（recordSubId と record内包に対応）
                     item_90 = sub_90[i] if isinstance(sub_90, list) and len(sub_90) > i else {}
+                    sub_id_90 = item_90.get("recordSubId", item_90.get("Id", ""))
                     rec_90 = item_90.get("record", item_90) if isinstance(item_90, dict) else {}
-                    id_90 = item_90.get("Id", rec_90.get("Id", ""))
                     
+                    # 💡 field-88 の取得
                     item_88 = sub_88[i] if isinstance(sub_88, list) and len(sub_88) > i else {}
+                    sub_id_88 = item_88.get("recordSubId", item_88.get("Id", ""))
                     rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
-                    id_88 = item_88.get("Id", rec_88.get("Id", ""))
                     
+                    # 💡 field-89 の取得
                     item_89 = sub_89[i] if isinstance(sub_89, list) and len(sub_89) > i else {}
+                    sub_id_89 = item_89.get("recordSubId", item_89.get("Id", ""))
                     rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
-                    id_89 = item_89.get("Id", rec_89.get("Id", ""))
                     
                     flat_data.append({
                         "更新": False,
                         "_record_idx": record_idx,
-                        "_id_90": id_90,
-                        "_id_88": id_88,
-                        "_id_89": id_89,
+                        "_id_90": sub_id_90,
+                        "_id_88": sub_id_88,
+                        "_id_89": sub_id_89,
                         "受注番号": h_ord_no,
                         "受注日": h_ord_date,
                         "出版社名": h_pub,
@@ -287,36 +285,52 @@ with tab1:
                 sub89_list = []
                 
                 for _, row in group_df.iterrows():
+                    # 💡 1. 配本・工程 (field-90): recordSubId と record の入れ子構造で構築
                     item_90 = {}
                     if row.get("_id_90") and str(row["_id_90"]).strip() not in ["", "nan", "None"]:
-                        item_90["Id"] = row["_id_90"]
-                    item_90.update({
+                        item_90["recordSubId"] = str(row["_id_90"])
+                    
+                    item_90["record"] = {
                         "field-90_1": str(row["配本日"]) if pd.notna(row["配本日"]) else "",
                         "field-90_3": str(row["折本日"]) if pd.notna(row["折本日"]) else "",
                         "field-90_4": str(row["無線日"]) if pd.notna(row["無線日"]) else "",
                         "field-90_5": str(row["三方日"]) if pd.notna(row["三方日"]) else "",
                         "field-90_6": str(row["仕上日"]) if pd.notna(row["仕上日"]) else "",
                         "field-90_7": bool(row["チェック"]),
-                        "field-90_9": str(row["備考"]) if pd.notna(row["備考"]) else ""
-                    })
+                        "field-90_9": str(row["備考"]) if pd.notna(row["備考"]) else "",
+                        "field-90_2": ""  # 生JSONにあったフィールドも保持
+                    }
                     sub90_list.append(item_90)
                     
+                    # 💡 2. 納品 (field-88): recordSubId と record の入れ子構造で構築
                     item_88 = {}
                     if row.get("_id_88") and str(row["_id_88"]).strip() not in ["", "nan", "None"]:
-                        item_88["Id"] = row["_id_88"]
-                    item_88.update({
+                        item_88["recordSubId"] = str(row["_id_88"])
+                    
+                    item_88["record"] = {
+                        "field-88_1": "1",
                         "field-88_2": str(row["納品日"]) if pd.notna(row["納品日"]) else "",
-                        "field-88_4": int(row["納品数"]) if str(row["納品数"]).isdigit() else 0
-                    })
+                        "field-88_3": "本書",
+                        "field-88_4": str(int(row["納品数"])) if str(row["納品数"]).isdigit() else "0",
+                        "field-88_5": "",
+                        "field-88_6": []
+                    }
                     sub88_list.append(item_88)
                         
+                    # 💡 3. 売上 (field-89): recordSubId と record の入れ子構造で構築
                     item_89 = {}
                     if row.get("_id_89") and str(row["_id_89"]).strip() not in ["", "nan", "None"]:
-                        item_89["Id"] = row["_id_89"]
-                    item_89.update({
+                        item_89["recordSubId"] = str(row["_id_89"])
+                    
+                    item_89["record"] = {
                         "field-89_1": str(row["売上日"]) if pd.notna(row["売上日"]) else "",
-                        "field-89_3": int(row["請求数量"]) if str(row["請求数量"]).isdigit() else 0
-                    })
+                        "field-89_2": "",
+                        "field-89_3": str(int(row["請求数量"])) if str(row["請求数量"]).isdigit() else "0",
+                        "field-89_4": "",
+                        "field-89_5": "0",
+                        "field-89_6": "0",
+                        "field-89_7": ""
+                    }
                     sub89_list.append(item_89)
 
                 record_payload["field-90"] = sub90_list
@@ -328,10 +342,6 @@ with tab1:
                     "record": record_payload
                 }
                 
-                # 🔍 デバッグ用：送信するJSONペイロードを画面上に表示（エラー発生時の確認用）
-                with st.expander(f"📤 【デバッグ】レコードID {record_id} の送信ペイロード確認"):
-                    st.json(payload)
-
                 try:
                     res = requests.put(update_url, headers=headers, json=payload, timeout=15)
                     if res.status_code in [200, 204]:
@@ -414,4 +424,4 @@ with tab3:
         </html>
         """
         st.success("請求書PDFの準備ができました！")
-        st.download_button("📥 請求書PDFをダウンロード", data=html_content.encode("utf-8"), file_name=f"請求書_{field_2 if 'field_2' in locals() else 'i'}.html", mime="text/html")
+        st.download_button("📥 請求書PDFをダウンロード", data=inv_html.encode("utf-8"), file_name=f"請求書_{field_2 if 'field_2' in locals() else 'i'}.html", mime="text/html")
