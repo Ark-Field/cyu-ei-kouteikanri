@@ -20,22 +20,25 @@ else:
 
 APP_ID = 34  # @ポケット対象アプリID
 
-# 3. APIデータ取得 ＆ 件数拡張 ＆ 日付正規化付き期間フィルタリング関数
+# 3. APIデータ取得 ＆ クエリパラメータによる期間絞り込み関数
 def fetch_pocket_records(start_date=None, end_date=None):
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
     headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
     
-    # 💡 Pleasanter APIのデフォルト200件制限を突破するため最大件数（2000件）を指定
-    payload = {
-        "Count": 2000
-    }
+    # 💡 @pocket（Pleasanter）のAPIクエリパラメータを使ってサーバー側で期間絞り込み
+    params = {}
+    if start_date and end_date:
+        start_str = start_date.strftime("%Y-%m-%d")
+        end_str = end_date.strftime("%Y-%m-%d")
+        # field-1（受注日）を対象にクエリを設定
+        params["query"] = f'field-1 >= "{start_str}" and field-1 <= "{end_str}"'
     
     try:
-        # POSTリクエストでCountを指定して取得を試みる
-        response = requests.post(url, headers=headers, json=payload, timeout=20)
+        # GETリクエストにparamsを付与して取得
+        response = requests.get(url, headers=headers, params=params, timeout=20)
         
-        if response.status_code != 200:
-            # 失敗した場合はGETでフォールバック
+        # クエリ指定でエラーになる環境を考慮し、失敗した場合はクエリなし（全件）で再取得してフォールバック
+        if response.status_code != 200 and "query" in params:
             response = requests.get(url, headers=headers, timeout=20)
         
         if response.status_code == 200:
@@ -54,7 +57,7 @@ def fetch_pocket_records(start_date=None, end_date=None):
                 rec_body["_accessEditUrl"] = item.get("accessEditUrl", "")
                 parsed_records.append(rec_body)
             
-            # 受注日（field-1）による堅牢な期間フィルタリング
+            # Python側でも二重の安全策として日付の正規化・期間フィルタリングを実施
             if start_date and end_date and parsed_records:
                 filtered_records = []
                 start_str = start_date.strftime("%Y-%m-%d")
@@ -62,10 +65,10 @@ def fetch_pocket_records(start_date=None, end_date=None):
                 
                 for r in parsed_records:
                     raw_date_str = str(r.get("field-1", ""))
-                    if not raw_date_str or raw_date_str.lower() == "nan" or raw_date_str.lower() == "none":
+                    if not raw_date_str or raw_date_str.lower() in ["nan", "none"]:
                         continue
                     
-                    # 💡 日付の正規化処理（スラッシュをハイフンに置換し、YYYY-MM-DD形式に統一）
+                    # 日付の正規化処理（スラッシュをハイフンに置換し、YYYY-MM-DD形式に統一）
                     r_date = raw_date_str.replace("/", "-")[:10]
                     
                     if len(r_date) == 10 and (start_str <= r_date <= end_str):
@@ -98,7 +101,7 @@ with tab1:
     default_start = datetime(2026, 10, 1).date()
     default_end = datetime(2026, 10, 31).date()
     
-    st.write("🔍 **受注日の期間を指定し、「検索実行」ボタンを押すと該当データを取得します（API負荷軽減）**")
+    st.write("🔍 **受注日の期間を指定し、「検索実行」ボタンを押すと該当データを取得します**")
     
     c1, c2, c3 = st.columns([2, 2, 1])
     with c1:
