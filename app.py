@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, date
 
 # 1. ページ基本設定
 st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（明細ID保持・同期保存版）")
+st.title("📊 @pocket連動 受注・工程・納品・請求管理システム")
 
 # 2. Secrets設定
 if "pocket" in st.secrets:
@@ -124,8 +124,8 @@ with tab1:
             for record_idx, r in enumerate(api_records):
                 h_ord_no = str(r.get("field-2", ""))
                 h_ord_date = parse_date_safe(r.get("field-1"))
-                h_pub = str(r.get("field-8", ""))
-                h_title = str(r.get("field-13", ""))
+                h_pub = str(r.get("field-8", ""))    # リンク参照（表示用）
+                h_title = str(r.get("field-13", "")) # リンク参照（表示用）
                 h_qty = str(r.get("field-4", ""))
                 h_price = str(r.get("field-5", ""))
                 
@@ -190,8 +190,8 @@ with tab1:
                     "_id_89": None,
                     "受注番号": st.column_config.TextColumn("受注番号"),
                     "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD"),
-                    "出版社名": st.column_config.TextColumn("出版社名"),
-                    "書名": st.column_config.TextColumn("書名"),
+                    "出版社名": st.column_config.TextColumn("出版社名", disabled=True), # リンク参照データのため編集不可
+                    "書名": st.column_config.TextColumn("書名", disabled=True),          # リンク参照データのため編集不可
                     "製本数": st.column_config.TextColumn("製本数"),
                     "単価": st.column_config.TextColumn("単価"),
                     "配本日": st.column_config.DateColumn("配本日", format="YYYY-MM-DD"),
@@ -255,7 +255,6 @@ with tab1:
                 
                 update_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records/{record_id}"
                 
-                # 💡 明細ID（Id）をそのまま保持して同じ位置に書き戻すペイロード構造
                 sub90_item = {}
                 if row["_id_90"]:
                     sub90_item["Id"] = row["_id_90"]
@@ -285,13 +284,12 @@ with tab1:
                     "field-89_3": int(row["請求数量"]) if str(row["請求数量"]).isdigit() else 0
                 })
 
+                # 💡 リンク参照項目 (field-8, field-13) は更新ペイロードから除外
                 payload = {
                     "apiVersion": 1.1,
                     "record": {
                         "field-2": str(row["受注番号"]),
                         "field-1": str(row["受注日"]),
-                        "field-8": str(row["出版社名"]),
-                        "field-13": str(row["書名"]),
                         "field-4": str(row["製本数"]),
                         "field-5": str(row["単価"]),
                         "field-90": [sub90_item],
@@ -375,7 +373,7 @@ with tab3:
             <p>単価: ¥{field_5} × 製本数: {field_4}</p>
             <div class="box">
                 <strong>【お振込先】</strong><br>
-                {bank_name} {bank_branch} ({bank_type}） {bank_account}<br>
+                {bank_name} {bank_branch} ({bank_type}) {bank_account}<br>
                 口座名義: {bank_holder}
             </div>
         </body>
