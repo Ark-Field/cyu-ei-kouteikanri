@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 # 1. ページ基本設定
 st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（明細対応版）")
+st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（完全明細対応版）")
 
 # 2. Secrets設定
 if "pocket" in st.secrets:
@@ -45,13 +45,17 @@ def fetch_pocket_records(start_date=None, end_date=None):
             for item in raw_items:
                 if not isinstance(item, dict):
                     continue
-                rec_body = item.get("record", {})
-                if not rec_body:
-                    rec_body = item
                 
-                rec_body["_recordId"] = item.get("recordId", item.get("Id", ""))
-                rec_body["_accessEditUrl"] = item.get("accessEditUrl", "")
-                parsed_records.append(rec_body)
+                # 親レコード本体と record 内部の両方を統合してサブテーブルを取り出しやすくする
+                rec_body = item.get("record", {})
+                if not isinstance(rec_body, dict):
+                    rec_body = {}
+                
+                # item 自体にあるデータ（サブテーブル等）もマージ
+                merged_body = {**item, **rec_body}
+                merged_body["_recordId"] = item.get("recordId", item.get("Id", ""))
+                merged_body["_accessEditUrl"] = item.get("accessEditUrl", "")
+                parsed_records.append(merged_body)
             
             # 日付の正規化・期間フィルタリング
             if start_date and end_date and parsed_records:
@@ -94,7 +98,7 @@ with tab1:
     default_start = datetime(2026, 10, 1).date()
     default_end = datetime(2026, 10, 31).date()
     
-    st.write("🔍 **期間を指定して「検索実行」を押すと、ヘッダーと明細行（納品・売上等）が横並びになった一覧表が表示されます。**")
+    st.write("🔍 **期間を指定して「検索実行」を押すと、ヘッダーと各明細（工程・納品・売上）が横並びになった一覧表が表示されます。**")
     
     c1, c2, c3 = st.columns([2, 2, 1])
     with c1:
@@ -116,7 +120,6 @@ with tab1:
         if api_records:
             st.success(f"✨ 親レコード **{len(api_records)} 件** を取得しました。明細を展開してフラット表示します。")
             
-            # ヘッダー情報とサブテーブル（field-88 納品 / field-89 売上 / field-90 工程）を結合してフラットなリストを作成
             flat_data = []
             for record_idx, r in enumerate(api_records):
                 h_ord_no = str(r.get("field-2", ""))
@@ -126,37 +129,29 @@ with tab1:
                 h_qty = str(r.get("field-4", ""))
                 h_price = str(r.get("field-5", ""))
                 
-                # 明細2（field-88: 納品日, 納品数）を優先して展開
-                sub_items = r.get("field-88", [])
-                if not isinstance(sub_items, list) or len(sub_items) == 0:
-                    # 代替として明細3（field-89: 売上日, 請求数量）もチェック
-                    sub_items = r.get("field-89", [])
+                # 3つのサブテーブル（field-90:工程, field-88:納品, field-89:売上）をチェック
+                sub_90 = r.get("field-90", [])  # 工程
+                sub_88 = r.get("field-88", [])  # 納品
+                sub_89 = r.get("field-89", [])  # 売上
                 
-                if isinstance(sub_items, list) and len(sub_items) > 0:
-                    for sub_idx, sub in enumerate(sub_items):
-                        if isinstance(sub, dict):
-                            sub_rec = sub.get("record", sub)
-                        else:
-                            sub_rec = {}
-                        
-                        # 正式なフィールドIDから値を取得
-                        d_date = str(sub_rec.get("field-88_2", sub_rec.get("field-89_1", "")))[:10]
-                        d_qty = str(sub_rec.get("field-88_4", sub_rec.get("field-89_3", h_qty)))
-                        
-                        flat_data.append({
-                            "選択": False,
-                            "_record_idx": record_idx,
-                            "受注番号": h_ord_no,
-                            "受注日": h_ord_date,
-                            "出版社名": h_pub,
-                            "書名": h_title,
-                            "製本数": h_qty,
-                            "単価": h_price,
-                            "明細日付(納品/売上)": d_date,
-                            "明細数量": d_qty
-                        })
-                else:
-                    # 明細がない場合はヘッダーのみ1行として展開（明細が2行あればヘッダー付きで2行生成されます）
+                # 最も要素数が多いサブテーブルを基準にループ、なければ空リスト
+                max_len = max(len(sub_90) if isinstance(sub_90, list) else 0,
+                              len(sub_88) if isinstance(sub_88, list) else 0,
+                              len(sub_89) if isinstance(sub_89, list) else 0, 1)
+                
+                for i in range(max_len):
+                    # 明細1 (field-90: 工程)
+                    item_90 = sub_90[i] if isinstance(sub_90, list) and len(sub_90) > i else {}
+                    rec_90 = item_90.get("record", item_90) if isinstance(item_90, dict) else {}
+                    
+                    # 明細2 (field-88: 納品)
+                    item_88 = sub_88[i] if isinstance(sub_88, list) and len(sub_88) > i else {}
+                    rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
+                    
+                    # 明細3 (field-89: 売上)
+                    item_89 = sub_89[i] if isinstance(sub_89, list) and len(sub_89) > i else {}
+                    rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
+                    
                     flat_data.append({
                         "選択": False,
                         "_record_idx": record_idx,
@@ -166,13 +161,24 @@ with tab1:
                         "書名": h_title,
                         "製本数": h_qty,
                         "単価": h_price,
-                        "明細日付(納品/売上)": "",
-                        "明細数量": h_qty
+                        # 明細1: 工程
+                        "配本日": str(rec_90.get("field-90_1", ""))[:10],
+                        "折本日": str(rec_90.get("field-90_3", ""))[:10],
+                        "無線日": str(rec_90.get("field-90_4", ""))[:10],
+                        "三方日": str(rec_90.get("field-90_5", ""))[:10],
+                        "仕上日": str(rec_90.get("field-90_6", ""))[:10],
+                        "チェック": bool(rec_90.get("field-90_7", False)),
+                        "工程備考": str(rec_90.get("field-90_9", "")),
+                        # 明細2: 納品
+                        "納品日": str(rec_88.get("field-88_2", ""))[:10],
+                        "納品数": str(rec_88.get("field-88_4", "")),
+                        # 明細3: 売上
+                        "売上日": str(rec_89.get("field-89_1", ""))[:10],
+                        "請求数量": str(rec_89.get("field-89_3", ""))
                     })
             
             df_flat = pd.DataFrame(flat_data)
             
-            # st.data_editor でフラット一覧を表示・編集可能に
             edited_flat_df = st.data_editor(
                 df_flat,
                 num_rows="fixed",
@@ -187,12 +193,20 @@ with tab1:
                     "書名": st.column_config.TextColumn("書名"),
                     "製本数": st.column_config.TextColumn("製本数"),
                     "単価": st.column_config.TextColumn("単価"),
-                    "明細日付(納品/売上)": st.column_config.TextColumn("明細日付"),
-                    "明細数量": st.column_config.TextColumn("明細数量"),
+                    "配本日": st.column_config.TextColumn("配本日"),
+                    "折本日": st.column_config.TextColumn("折本日"),
+                    "無線日": st.column_config.TextColumn("無線日"),
+                    "三方日": st.column_config.TextColumn("三方日"),
+                    "仕上日": st.column_config.TextColumn("仕上日"),
+                    "チェック": st.column_config.CheckboxColumn("チェック"),
+                    "工程備考": st.column_config.TextColumn("工程備考"),
+                    "納品日": st.column_config.TextColumn("納品日"),
+                    "納品数": st.column_config.TextColumn("納品数"),
+                    "売上日": st.column_config.TextColumn("売上日"),
+                    "請求数量": st.column_config.TextColumn("請求数量"),
                 }
             )
             
-            # 選択された行の取得
             selected_rows = edited_flat_df[edited_flat_df["選択"] == True]
             
             if not selected_rows.empty:
