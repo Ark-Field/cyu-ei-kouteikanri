@@ -20,13 +20,38 @@ else:
 
 APP_ID = 34  # @ポケット対象アプリID
 
-# 3. APIデータ取得 ＆ 受注日（field-1）による期間フィルタリング関数
+# 3. APIデータ取得関数（検索条件指定＆期間フィルタリング対応）
 def fetch_pocket_records(start_date=None, end_date=None):
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
     headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
     
+    # PleasanterのAPI仕様に合わせた検索条件（Condition）の構築
+    # 受注日（field-1）を対象に、指定期間内のデータをサーバー側で絞り込み要求します
+    payload = {}
+    if start_date and end_date:
+        start_str = start_date.strftime("%Y-%m-%d")
+        end_str = end_date.strftime("%Y-%m-%d")
+        payload = {
+            "View": {
+                "Condition": {
+                    "field-1": f"{start_str},{end_str}"
+                }
+            }
+        }
+    
     try:
-        response = requests.get(url, headers=headers, timeout=20)
+        # POSTリクエストまたはGETリクエスト（Pleasanterは検索時にPOSTで条件を渡す仕様、またはGET）
+        # ※バックエンドの挙動に合わせて確実にデータを取得できるよう、まず条件付きPOSTを試行し、失敗した場合はGETで全件取得＋Python側絞り込みにフォールバックします
+        response = None
+        if payload:
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=20)
+            except Exception:
+                pass
+        
+        if response is None or response.status_code != 200:
+            # フォールバックとしてGETリクエストを実行
+            response = requests.get(url, headers=headers, timeout=20)
         
         if response.status_code == 200:
             result = response.json()
@@ -44,7 +69,7 @@ def fetch_pocket_records(start_date=None, end_date=None):
                 rec_body["_accessEditUrl"] = item.get("accessEditUrl", "")
                 parsed_records.append(rec_body)
             
-            # 受注日（field-1）による厳密な期間フィルタリング
+            # Python側でも確実に期間フィルタリング（二重の安全策）
             if start_date and end_date and parsed_records:
                 filtered_records = []
                 start_str = start_date.strftime("%Y-%m-%d")
@@ -77,14 +102,11 @@ tab1, tab2, tab3 = st.tabs([
 with tab1:
     st.header("📋 受注データ一覧（受注日 `field-1` 期間検索）")
     
-    # 💡 初期値：今月の1日 〜 今月末日を設定（現在は2026年11月）
-    current_year = 2026
-    current_month = 11
-    default_start = datetime(current_year, current_month, 1).date()
-    # 11月末日（12月の1日の前日）
-    default_end = datetime(current_year, current_month + 1, 1).date() - timedelta(days=1)
+    # 初期値：2026年10月（テストデータに合わせて10月に設定、必要に応じて変更可能）
+    default_start = datetime(2026, 10, 1).date()
+    default_end = datetime(2026, 10, 31).date()
     
-    st.write("🔍 **受注日の期間を指定し、「検索実行」ボタンを押すと @pocket から該当データを取得します（API負荷軽減）**")
+    st.write("🔍 **受注日の期間を指定し、「検索実行」ボタンを押すと @pocket から該当データを取得します**")
     
     c1, c2, c3 = st.columns([2, 2, 1])
     with c1:
@@ -96,9 +118,8 @@ with tab1:
         st.write("")
         search_clicked = st.button("🔄 検索実行", type="primary", key="btn_s1")
 
-    # 検索ボタンが押されたときのみAPIを実行
     if search_clicked:
-        with st.spinner("@ポケットからデータを取得・受注日で絞り込み中..."):
+        with st.spinner("@ポケットからデータを取得・絞り込み中..."):
             st.session_state["api_records"] = fetch_pocket_records(t1_start, t1_end)
 
     api_records = st.session_state.get("api_records", None)
@@ -144,7 +165,7 @@ with tab1:
                 st.caption("ℹ️ 表の「選択」チェックボックスにチェックを入れると、下の詳細・明細・PDF発行対象を切り替えられます。（現在は先頭行を選択中）")
                 
         else:
-            st.warning("⚠️ 指定した受注日の範囲（今月）に該当するレコードがありませんでした。（過去のデータをテストする場合は開始日を2020年等に広げてください）")
+            st.warning("⚠️ 指定した受注日の範囲に該当するレコードがありませんでした。")
             sample_rec = {}
     else:
         st.info("ℹ️ 上の「検索実行」ボタンを押すとデータが読み込まれます。")
