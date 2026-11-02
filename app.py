@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 # 1. ページ基本設定
 st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @ポケット連動 受注・工程・納品・請求管理システム（一覧編集モード）")
+st.title("📊 @ポケット連動 受注・工程・納品・請求管理システム（日付デバッグ版）")
 
 # 2. Secrets設定
 if "pocket" in st.secrets:
@@ -20,7 +20,7 @@ else:
 
 APP_ID = 34  # @ポケット対象アプリID
 
-# 3. APIデータ取得・期間フィルタリング関数
+# 3. APIデータ取得・デバッグ用解析関数
 def fetch_pocket_records(start_date=None, end_date=None):
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
     headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
@@ -36,22 +36,37 @@ def fetch_pocket_records(start_date=None, end_date=None):
             for item in raw_items:
                 if not isinstance(item, dict):
                     continue
+                
+                # メタデータ（createdAt等）を保持
+                created_at = item.get("createdAt", "")
+                
+                # record本体を取得
                 rec_body = item.get("record", {})
                 if not rec_body:
                     rec_body = item
                 
                 rec_body["_recordId"] = item.get("recordId", item.get("Id", ""))
                 rec_body["_accessEditUrl"] = item.get("accessEditUrl", "")
+                rec_body["_createdAt"] = created_at  # デバッグ用
                 parsed_records.append(rec_body)
             
-            # 受注日（field-1）による期間フィルタリング
+            # 💡 【デバッグ用】取得した全データの受注日(field-1)と作成日(_createdAt)を画面に表示
+            if parsed_records:
+                st.write("▼ 【日付デバッグ】@pocketから取得した全レコードの日付一覧:", 
+                         [{"ID": r.get("_recordId"), "受注番号": r.get("field-2"), "受注日(field-1)": r.get("field-1"), "作成日時(_createdAt)": r.get("_createdAt"), "書名": r.get("field-13")} for r in parsed_records[:10]])
+            
+            # 期間フィルタリング
             if start_date and end_date and parsed_records:
                 filtered_records = []
                 start_str = start_date.strftime("%Y-%m-%d")
                 end_str = end_date.strftime("%Y-%m-%d")
                 
                 for r in parsed_records:
+                    # field-1 が空なら作成日(_createdAt)をフォールバックとして使う
                     r_date = str(r.get("field-1", ""))[:10]
+                    if not r_date or r_date.strip() == "":
+                        r_date = str(r.get("_createdAt", ""))[:10]
+                    
                     if not r_date or (start_str <= r_date <= end_str):
                         filtered_records.append(r)
                 return filtered_records
@@ -75,13 +90,14 @@ tab1, tab2, tab3 = st.tabs([
 # タブ1：受注日検索 ＆ 一覧エディタ編集
 # ==========================================
 with tab1:
-    st.header("📋 受注データ一覧（期間絞り込み＆グリッド編集）")
+    st.header("📋 受注データ一覧（日付絞り込みデバッグモード）")
     
     today = datetime.now().date()
-    default_start = datetime(today.year, 1, 1).date()
-    default_end = today
+    # 2026年10月を初期値としてテストしやすく設定
+    default_start = datetime(2026, 10, 1).date()
+    default_end = datetime(2026, 10, 31).date()
     
-    st.write("🔍 **検索条件を指定し、「検索実行」ボタンを押すと対象レコード（約40件）を一覧表示します**")
+    st.write("🔍 **2026年10月のテストデータを探すため、期間を 2026-10-01 〜 2026-10-31 にして「検索実行」を押してください**")
     
     c1, c2, c3 = st.columns([2, 2, 1])
     with c1:
@@ -93,7 +109,6 @@ with tab1:
         st.write("")
         search_clicked = st.button("🔄 検索実行", type="primary", key="btn_s1")
 
-    # 検索ボタンが押されたときのみAPIを実行
     if search_clicked:
         with st.spinner("@ポケットからデータを取得・絞り込み中..."):
             st.session_state["api_records"] = fetch_pocket_records(t1_start, t1_end)
@@ -102,9 +117,8 @@ with tab1:
     
     if api_records is not None:
         if api_records:
-            st.success(f"✨ 条件に合致するレコード **{len(api_records)} 件** を取得しました。下の表で一覧編集が可能です。")
+            st.success(f"✨ 条件に合致するレコード **{len(api_records)} 件** を取得しました。")
             
-            # 一覧表示・編集用のデータフレームを作成（主要フィールドを抽出）
             summary_data = []
             for idx, r in enumerate(api_records):
                 summary_data.append({
@@ -112,6 +126,7 @@ with tab1:
                     "インデックス": idx,
                     "受注番号": str(r.get("field-2", "")),
                     "受注日": str(r.get("field-1", "")),
+                    "作成日": str(r.get("_createdAt", "")),
                     "出版社名": str(r.get("field-8", "")),
                     "書名": str(r.get("field-13", "")),
                     "製本数": str(r.get("field-4", "")),
@@ -119,8 +134,6 @@ with tab1:
                 })
             
             df_summary = pd.DataFrame(summary_data)
-            
-            # 📊 一覧グリッドエディタの表示
             edited_summary_df = st.data_editor(
                 df_summary,
                 num_rows="fixed",
@@ -128,28 +141,21 @@ with tab1:
                 use_container_width=True,
                 column_config={
                     "選択": st.column_config.CheckboxColumn("選択", required=True),
-                    "インデックス": None # ID列は非表示
+                    "インデックス": None
                 }
             )
             
-            # 選択された行の特定（チェックボックスがTrueのもの）
             selected_rows = edited_summary_df[edited_summary_df["選択"] == True]
-            
             if not selected_rows.empty:
-                # 複数選択された場合は最初の1件、または必要に応じて処理
                 target_idx = int(selected_rows.iloc[0]["インデックス"])
                 sample_rec = api_records[target_idx]
-                st.info(f"📌 現在選択中のレコード: **受注番号 {sample_rec.get('field-2', '')} ({sample_rec.get('field-13', '')})**")
             else:
-                # チェックがない場合は先頭のレコードをデフォルト選択
                 sample_rec = api_records[0]
-                st.caption("ℹ️ 表の「選択」チェックボックスにチェックを入れると、詳細・明細・PDF発行対象を切り替えられます。（現在は先頭行を選択中）")
-                
         else:
-            st.warning("⚠️ 指定した受注日の範囲に該当するレコードがありませんでした。")
+            st.warning("⚠️ 指定した期間に該当するレコードがありませんでした上のデバッグ一覧（全データの日付一覧）を確認してみてください。")
             sample_rec = {}
     else:
-        st.info("ℹ️ 上の「検索実行」ボタンを押すと、40件程度の一覧データが読み込まれます。")
+        st.info("ℹ️ 上の「検索実行」ボタンを押すとデータが読み込まれます。")
         sample_rec = {}
 
     st.divider()
@@ -245,4 +251,4 @@ with tab3:
         </html>
         """
         st.success("請求書PDFの準備ができました！")
-        st.download_button("📥 請求書PDFをダウンロード", data=html_content.encode("utf-8"), file_name=f"請求書_{field_2}.html", mime="text/html")
+        st.download_button("📥 請求書PDFをダウンロード", data=inv_html.encode("utf-8"), file_name=f"請求書_{field_2}.html", mime="text/html")
