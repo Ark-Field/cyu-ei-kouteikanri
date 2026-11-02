@@ -9,8 +9,8 @@ import streamlit as st
 # ==========================================
 # 1. ページ基本設定
 # ==========================================
-st.set_page_config(page_title="受注・進捗・帳票管理システム", layout="wide")
-st.title("📊 @pocket連動 受注進捗・日付更新管理システム")
+st.set_page_config(page_title="受注一覧表", layout="wide")
+st.title("📊 受注一覧表")
 
 # ==========================================
 # 2. Secrets設定
@@ -106,7 +106,7 @@ url_order_no = query_params.get("ord", None)
 # 初回起動時やURLパラメータがある場合、セッションに自動ロード
 if "api_records" not in st.session_state or url_order_no:
     if url_order_no:
-        with st.spinner(f"@ポケットから受注番号: {url_order_no} のデータを取得中..."):
+        with st.spinner(f"DBから受注番号: {url_order_no} のデータを取得中..."):
             st.session_state["api_records"] = fetch_pocket_records(target_order_no=url_order_no)
     else:
         default_end = date.today()
@@ -117,19 +117,19 @@ if "api_records" not in st.session_state or url_order_no:
 # 5. タブ構成の定義
 # ==========================================
 tab1, tab2, tab3 = st.tabs([
-    "📋 タブ1: 進捗・日付更新エディタ", 
+    "📋 タブ1: 受注一覧表", 
     "📦 タブ2: 納品書発行", 
-    "📄 タブ3: 請求書発行（口座UI付き）"
+    "📄 タブ3: 請求書発行（口座指定可）"
 ])
 
 # ==========================================
 # タブ1：進捗・日付更新エディタ
 # ==========================================
 with tab1:
-    st.header("📋 受注進捗・日付更新管理エディタ")
+    st.header("📋 受注一覧表")
     
     if url_order_no:
-        st.success(f"🔗 @pocketから受注番号 **{url_order_no}** の指定を受けてダイレクト起動しました！")
+        st.success(f"🔗 DBから受注番号 **{url_order_no}** の起動しました！")
     
     # 検索コントロール（期間指定 ＆ 受注番号直接検索）
     with st.expander("🔍 検索条件の変更・受注番号直接指定はこちら", expanded=bool(not url_order_no)):
@@ -540,13 +540,13 @@ with tab3:
     
     bc1, bc2, bc3 = st.columns(3)
     with bc1:
-        bank_name = st.text_input("銀行名", value="千葉銀行", key="b_name")
-        bank_branch = st.text_input("支店名", value="市川支店", key="b_branch")
+        bank_name = st.text_input("銀行名", value="三井住友銀行", key="b_name")
+        bank_branch = st.text_input("支店名", value="岩槻支店", key="b_branch")
     with bc2:
         bank_type = st.selectbox("口座種別", options=["普通", "当座"], key="b_type")
         bank_account = st.text_input("口座番号", value="1234567", key="b_acc")
     with bc3:
-        bank_holder = st.text_input("口座名義", value="カ）アークフィールド", key="b_holder")
+        bank_holder = st.text_input("口座名義", value="カ）チュウエイセイホンジョ", key="b_holder")
 
     raw_sales_list = sample_rec.get("field-89", []) if 'sample_rec' in locals() else []
     sales_table_data = []
