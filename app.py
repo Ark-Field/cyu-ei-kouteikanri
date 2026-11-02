@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, date
 
 # 1. ページ基本設定
 st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（明細自動判定版）")
+st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（明細常時同期版）")
 
 # 2. Secrets設定
 if "pocket" in st.secrets:
@@ -98,7 +98,7 @@ with tab1:
     default_start = datetime(2026, 10, 1).date()
     default_end = datetime(2026, 10, 31).date()
     
-    st.write("🔍 **期間を指定して「検索実行」を押してください。編集後、更新したい行にチェックを入れて保存ボタンを押します。**")
+    st.write("🔍 **期間を指定して納品・工程データを確認し、チェックを入れて上書き保存できます。**")
     
     c1, c2, c3 = st.columns([2, 2, 1])
     with c1:
@@ -255,7 +255,15 @@ with tab1:
                 
                 update_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records/{record_id}"
                 
-                # 💡 既存IDがある場合は更新、ない場合は新規追加用の構造として組み立て
+                # ヘッダー情報の構築
+                record_payload = {
+                    "field-2": str(row["受注番号"]),
+                    "field-1": str(row["受注日"]),
+                    "field-4": str(row["製本数"]),
+                    "field-5": str(row["単価"]),
+                }
+                
+                # 💡 明細1 (field-90: 配本等) - 空であっても枠を維持して常時送信
                 sub90_item = {}
                 if row["_id_90"]:
                     sub90_item["Id"] = row["_id_90"]
@@ -268,7 +276,9 @@ with tab1:
                     "field-90_7": bool(row["チェック"]),
                     "field-90_9": str(row["備考"])
                 })
-                
+                record_payload["field-90"] = [sub90_item]
+
+                # 💡 明細2 (field-88: 納品) - 空であっても枠を維持して常時送信
                 sub88_item = {}
                 if row["_id_88"]:
                     sub88_item["Id"] = row["_id_88"]
@@ -276,7 +286,9 @@ with tab1:
                     "field-88_2": str(row["納品日"]) if row["納品日"] else "",
                     "field-88_4": int(row["納品数"]) if str(row["納品数"]).isdigit() else 0
                 })
-                
+                record_payload["field-88"] = [sub88_item]
+
+                # 💡 明細3 (field-89: 売上) - 空であっても枠を維持して常時送信
                 sub89_item = {}
                 if row["_id_89"]:
                     sub89_item["Id"] = row["_id_89"]
@@ -284,19 +296,11 @@ with tab1:
                     "field-89_1": str(row["売上日"]) if row["売上日"] else "",
                     "field-89_3": int(row["請求数量"]) if str(row["請求数量"]).isdigit() else 0
                 })
+                record_payload["field-89"] = [sub89_item]
 
-                # 💡 Pleasanter APIでサブテーブルを安全に送るため、入力値がある場合のみ（または常にリスト形式で）設定
                 payload = {
                     "apiVersion": 1.1,
-                    "record": {
-                        "field-2": str(row["受注番号"]),
-                        "field-1": str(row["受注日"]),
-                        "field-4": str(row["製本数"]),
-                        "field-5": str(row["単価"]),
-                        "field-90": [sub90_item],
-                        "field-88": [sub88_item],
-                        "field-89": [sub89_item],
-                    }
+                    "record": record_payload
                 }
                 
                 try:
