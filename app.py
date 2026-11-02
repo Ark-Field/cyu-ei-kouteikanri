@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 # 1. ページ基本設定
 st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @ポケット連動 受注・工程・納品・請求管理システム（受注日検索版）")
+st.title("📊 @ポケット連動 受注・工程・納品・請求管理システム（データ連携デバッグ版）")
 
 # 2. 【安全なSecrets取得処理】
 if "pocket" in st.secrets:
@@ -20,7 +20,7 @@ else:
 
 APP_ID = 34  # @ポケット対象アプリID
 
-# 3. @ポケット API通信関数（受注日などのクエリで絞り込み取得）
+# 3. @ポケット API通信関数（受注日での絞り込み取得 ＆ デバッグログ付き）
 def fetch_pocket_records_by_order_date(start_date, end_date):
     """
     受注日（field-1）をキーにしてAPIからデータを取得する関数
@@ -28,26 +28,31 @@ def fetch_pocket_records_by_order_date(start_date, end_date):
     api_url = f"{POCKET_BASE_URL}/api/items/getlist/{APP_ID}"
     headers = {"Content-Type": "application/json"}
     
-    # PleasanterのAPI検索条件（必要に応じてColumnFilterHash等でfield-1を指定）
+    # PleasanterのAPI仕様に合わせたリクエストペイロード
     payload = {
         "ApiVersion": 1.1,
         "ApiKey": POCKET_API_KEY,
         "View": {
             "ColumnFilterHash": {
-                # "field-1": f"{start_date}~{end_date}" # API側の検索仕様に合わせる部分
+                # 必要に応じて日付フィルターを有効化
+                # "field-1": f"{start_date}~{end_date}"
             }
         }
     }
     
     try:
         response = requests.post(api_url, json=payload, headers=headers)
+        st.write(f"📡 APIステータスコード: {response.status_code}") # デバッグ用表示
         if response.status_code == 200:
             result = response.json()
-            return result.get("Response", {}).get("Data", [])
+            # レスポンスのデータ構造を確認
+            data_list = result.get("Response", {}).get("Data", [])
+            return data_list
+        else:
+            st.error(f"APIエラーレスポンス: {response.text}")
     except Exception as e:
-        pass
+        st.error(f"API通信例外エラー: {e}")
     
-    # 通信失敗時や初期テスト用のフォールバックデータ
     return []
 
 # 4. 3タブ構成の定義
@@ -64,7 +69,6 @@ with tab1:
     st.header("📋 工程・進捗・日付の入力管理（受注日検索）")
     
     today = datetime.now().date()
-    # デフォルトは今月1日〜本日
     default_start = datetime(today.year, today.month, 1).date()
     default_end = today
     
@@ -77,29 +81,45 @@ with tab1:
     with c3:
         st.write("")
         st.write("")
-        if st.button("🔄 検索実行", type="primary", key="btn_s1"):
-            st.success(f"受注日: {t1_start} 〜 {t1_end} のデータを検索しました！")
+        search_clicked = st.button("🔄 検索実行", type="primary", key="btn_s1")
+
+    # 検索ボタンが押されたらAPIを叩く
+    api_records = []
+    if search_clicked:
+        with st.spinner("@ポケットからデータを取得中..."):
+            api_records = fetch_pocket_records_by_order_date(t1_start, t1_end)
+            st.session_state["api_records"] = api_records
+    else:
+            api_records = st.session_state.get("api_records", [])
+
+    if api_records:
+        st.success(f"✨ {len(api_records)} 件のデータが取得できました！")
+    else:
+        st.info("ℹ️ 条件に合致するデータ、またはAPIからの取得データが空です（現在はテストデータまたはプレースホルダーを表示しています）。")
 
     st.divider()
     st.subheader("📝 ヘッダー情報（受注メイン：ご指定のフィールドID構成）")
     
+    # APIから取得できた場合は最初のレコードを反映、無ければデフォルト値
+    sample_rec = api_records[0] if api_records else {}
+    
     col_h1, col_h2, col_h3 = st.columns(3)
     with col_h1:
-        field_2 = st.text_input("受注番号 (field-2)", value="ORD-2026-001")
-        field_1 = st.text_input("受注日 (field-1)", value=str(today))
+        field_2 = st.text_input("受注番号 (field-2)", value=str(sample_rec.get("Title", "ORD-2026-001")))
+        field_1 = st.text_input("受注日 (field-1)", value=str(sample_rec.get("CreationTime", str(today))))
     with col_h2:
-        field_8 = st.text_input("出版社名 (field-8)", value="〇〇出版")
-        field_13 = st.text_input("書名 (field-13)", value="サンプル書籍")
+        field_8 = st.text_input("出版社名 (field-8)", value=str(sample_rec.get("ClassA", "〇〇出版")))
+        field_13 = st.text_input("書名 (field-13)", value=str(sample_rec.get("ClassB", "サンプル書籍")))
     with col_h3:
-        field_4 = st.text_input("製本数 (field-4)", value="1000")
-        field_5 = st.text_input("単価 (field-5)", value="1500")
+        field_4 = st.text_input("製本数 (field-4)", value=str(sample_rec.get("NumA", "1000")))
+        field_5 = st.text_input("単価 (field-5)", value=str(sample_rec.get("NumB", "1500")))
 
     st.divider()
     st.subheader("📝 明細データの編集（工程・納品・売上）")
     
     # 明細1：工程 (field-90)
     st.write("▼ **明細1（工程進捗: field-90）**")
-    default_eng = [{
+    default_eng = sample_rec.get("Results1", [{
         "field-90_1": "2026-11-01", 
         "field-90_3": "2026-11-03", 
         "field-90_4": "2026-11-05", 
@@ -107,19 +127,19 @@ with tab1:
         "field-90_6": "2026-11-07", 
         "field-90_7": True, 
         "field-90_9": "特記事項なし"
-    }]
+    }])
     edited_eng = st.data_editor(pd.DataFrame(default_eng), num_rows="dynamic", key="editor_eng", use_container_width=True)
 
     col_d1, col_d2 = st.columns(2)
     with col_d1:
         # 明細2：納品 (field-88)
         st.write("▼ **明細2（納品実績: field-88）**")
-        default_deliv = [{"field-88_2": "2026-11-08", "field-88_4": 1000}]
+        default_deliv = sample_rec.get("Results2", [{"field-88_2": "2026-11-08", "field-88_4": 1000}])
         edited_deliv = st.data_editor(pd.DataFrame(default_deliv), num_rows="dynamic", key="editor_deliv", use_container_width=True)
     with col_d2:
         # 明細3：売上 (field-89)
         st.write("▼ **明細3（売上実績: field-89）**")
-        default_sales = [{"field-89_1": "2026-11-10", "field-89_3": 1000}]
+        default_sales = sample_rec.get("Results3", [{"field-89_1": "2026-11-10", "field-89_3": 1000}])
         edited_sales = st.data_editor(pd.DataFrame(default_sales), num_rows="dynamic", key="editor_sales", use_container_width=True)
 
     # 上書き保存ボタン
