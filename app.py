@@ -336,7 +336,7 @@ with tab1:
                         }
                     })
 
-                # 3. field-89 の構築
+                # 3. field-89 の構築（💡 エラーになる無効な field-89_5, field-89_6 を除外）
                 orig_sub_89 = original_rec.get("field-89", [])
                 sub89_list = []
                 if isinstance(orig_sub_89, list) and len(orig_sub_89) > 0:
@@ -345,6 +345,10 @@ with tab1:
                     
                     rec_dict["field-89_1"] = str(row_90["売上日"]) if pd.notna(row_90["売上日"]) else ""
                     rec_dict["field-89_3"] = str(int(row_90["請求数量"])) if str(row_90["請求数量"]).isdigit() else "0"
+                    
+                    # 💡 無効フィールドの削除
+                    rec_dict.pop("field-89_5", None)
+                    rec_dict.pop("field-89_6", None)
                     
                     item_89["record"] = rec_dict
                     sub89_list.append(item_89)
@@ -355,8 +359,6 @@ with tab1:
                             "field-89_2": "",
                             "field-89_3": str(int(row_90["請求数量"])) if str(row_90["請求数量"]).isdigit() else "0",
                             "field-89_4": "",
-                            "field-89_5": "0",
-                            "field-89_6": "0",
                             "field-89_7": ""
                         }
                     })
