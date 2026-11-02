@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 # 1. ページ基本設定
 st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @ポケット連動 受注・工程・納品・請求管理システム（データ連携デバッグ版）")
+st.title("📊 @ポケット連動 受注・工程・納品・請求管理システム（API連携修正版）")
 
 # 2. 【安全なSecrets取得処理】
 if "pocket" in st.secrets:
@@ -20,15 +20,15 @@ else:
 
 APP_ID = 34  # @ポケット対象アプリID
 
-# 3. @ポケット API通信関数（受注日での絞り込み取得 ＆ デバッグログ付き）
+# 3. @ポケット API通信関数（正しいエンドポイントへ修正）
 def fetch_pocket_records_by_order_date(start_date, end_date):
     """
-    受注日（field-1）をキーにしてAPIからデータを取得する関数
+    PleasanterのAPI仕様に合わせた一覧取得/検索関数
     """
-    api_url = f"{POCKET_BASE_URL}/api/items/getlist/{APP_ID}"
+    # Pleasanterの一般的なAPI一覧取得エンドポイント
+    api_url = f"{POCKET_BASE_URL}/api/items/{APP_ID}/get"
     headers = {"Content-Type": "application/json"}
     
-    # PleasanterのAPI仕様に合わせたリクエストペイロード
     payload = {
         "ApiVersion": 1.1,
         "ApiKey": POCKET_API_KEY,
@@ -42,12 +42,11 @@ def fetch_pocket_records_by_order_date(start_date, end_date):
     
     try:
         response = requests.post(api_url, json=payload, headers=headers)
-        st.write(f"📡 APIステータスコード: {response.status_code}") # デバッグ用表示
+        st.write(f"📡 APIステータスコード: {response.status_code}")
         if response.status_code == 200:
             result = response.json()
-            # レスポンスのデータ構造を確認
             data_list = result.get("Response", {}).get("Data", [])
-            return data_list
+            return data_list if isinstance(data_list, list) else [data_list]
         else:
             st.error(f"APIエラーレスポンス: {response.text}")
     except Exception as e:
@@ -83,24 +82,22 @@ with tab1:
         st.write("")
         search_clicked = st.button("🔄 検索実行", type="primary", key="btn_s1")
 
-    # 検索ボタンが押されたらAPIを叩く
     api_records = []
     if search_clicked:
         with st.spinner("@ポケットからデータを取得中..."):
             api_records = fetch_pocket_records_by_order_date(t1_start, t1_end)
             st.session_state["api_records"] = api_records
     else:
-            api_records = st.session_state.get("api_records", [])
+        api_records = st.session_state.get("api_records", [])
 
     if api_records:
         st.success(f"✨ {len(api_records)} 件のデータが取得できました！")
     else:
-        st.info("ℹ️ 条件に合致するデータ、またはAPIからの取得データが空です（現在はテストデータまたはプレースホルダーを表示しています）。")
+        st.info("ℹ️ 検索結果が空、またはテストデータを使用しています。")
 
     st.divider()
     st.subheader("📝 ヘッダー情報（受注メイン：ご指定のフィールドID構成）")
     
-    # APIから取得できた場合は最初のレコードを反映、無ければデフォルト値
     sample_rec = api_records[0] if api_records else {}
     
     col_h1, col_h2, col_h3 = st.columns(3)
@@ -117,7 +114,6 @@ with tab1:
     st.divider()
     st.subheader("📝 明細データの編集（工程・納品・売上）")
     
-    # 明細1：工程 (field-90)
     st.write("▼ **明細1（工程進捗: field-90）**")
     default_eng = sample_rec.get("Results1", [{
         "field-90_1": "2026-11-01", 
@@ -132,17 +128,14 @@ with tab1:
 
     col_d1, col_d2 = st.columns(2)
     with col_d1:
-        # 明細2：納品 (field-88)
         st.write("▼ **明細2（納品実績: field-88）**")
         default_deliv = sample_rec.get("Results2", [{"field-88_2": "2026-11-08", "field-88_4": 1000}])
         edited_deliv = st.data_editor(pd.DataFrame(default_deliv), num_rows="dynamic", key="editor_deliv", use_container_width=True)
     with col_d2:
-        # 明細3：売上 (field-89)
         st.write("▼ **明細3（売上実績: field-89）**")
         default_sales = sample_rec.get("Results3", [{"field-89_1": "2026-11-10", "field-89_3": 1000}])
         edited_sales = st.data_editor(pd.DataFrame(default_sales), num_rows="dynamic", key="editor_sales", use_container_width=True)
 
-    # 上書き保存ボタン
     if st.button("💾 編集内容を @pocket に上書き保存する", type="primary", key="btn_save"):
         st.success("✅ @pocket（アプリID: 34）への上書き保存処理を実行しました！")
 
@@ -151,7 +144,6 @@ with tab1:
 # ==========================================
 with tab2:
     st.header("📦 今週の納品書発行（納品完了分抽出）")
-    
     today_dt = datetime.now()
     start_of_week = today_dt - timedelta(days=today_dt.weekday())
     end_of_week = start_of_week + timedelta(days=6)
@@ -192,7 +184,7 @@ with tab2:
 # ==========================================
 with tab3:
     st.header("📄 指定期間の請求書発行（売上確定分・月次集計）")
-    
+    today = datetime.now().date()
     c1, c2, c3 = st.columns([2, 2, 1])
     with c1:
         t3_start = st.date_input("対象期間（開始）", value=datetime(today.year, today.month, 1).date(), key="t3_s")
