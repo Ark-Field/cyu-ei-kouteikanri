@@ -145,17 +145,14 @@ with tab1:
                               len(sub_89) if isinstance(sub_89, list) else 0, 1)
                 
                 for i in range(max_len):
-                    # 💡 field-90 の取得（recordSubId と record内包に対応）
                     item_90 = sub_90[i] if isinstance(sub_90, list) and len(sub_90) > i else {}
                     sub_id_90 = item_90.get("recordSubId", item_90.get("Id", ""))
                     rec_90 = item_90.get("record", item_90) if isinstance(item_90, dict) else {}
                     
-                    # 💡 field-88 の取得
                     item_88 = sub_88[i] if isinstance(sub_88, list) and len(sub_88) > i else {}
                     sub_id_88 = item_88.get("recordSubId", item_88.get("Id", ""))
                     rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
                     
-                    # 💡 field-89 の取得
                     item_89 = sub_89[i] if isinstance(sub_89, list) and len(sub_89) > i else {}
                     sub_id_89 = item_89.get("recordSubId", item_89.get("Id", ""))
                     rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
@@ -280,58 +277,95 @@ with tab1:
                     "field-5": str(first_row["単価"]),
                 }
                 
-                sub90_list = []
-                sub88_list = []
-                sub89_list = []
+                # =========================================================
+                # 💡 究極の安全策：既存のサブテーブル構造を丸ごとディープコピーし、
+                #    中の record 値だけを安全に上書きして構築する
+                # =========================================================
+                import copy
                 
-                for _, row in group_df.iterrows():
-                    # 💡 1. 配本・工程 (field-90): recordSubId と record の入れ子構造で構築
-                    item_90 = {}
-                    if row.get("_id_90") and str(row["_id_90"]).strip() not in ["", "nan", "None"]:
-                        item_90["recordSubId"] = str(row["_id_90"])
+                # 1. field-90 の構築
+                orig_sub_90 = original_rec.get("field-90", [])
+                sub90_list = []
+                row_90 = group_df.iloc[0]
+                
+                if isinstance(orig_sub_90, list) and len(orig_sub_90) > 0:
+                    # 既存の構造を丸ごとコピー
+                    item_90 = copy.deepcopy(orig_sub_90[0])
+                    rec_dict = item_90.get("record", {})
                     
-                    item_90["record"] = {
-                        "field-90_1": str(row["配本日"]) if pd.notna(row["配本日"]) else "",
-                        "field-90_3": str(row["折本日"]) if pd.notna(row["折本日"]) else "",
-                        "field-90_4": str(row["無線日"]) if pd.notna(row["無線日"]) else "",
-                        "field-90_5": str(row["三方日"]) if pd.notna(row["三方日"]) else "",
-                        "field-90_6": str(row["仕上日"]) if pd.notna(row["仕上日"]) else "",
-                        "field-90_7": bool(row["チェック"]),
-                        "field-90_9": str(row["備考"]) if pd.notna(row["備考"]) else "",
-                        "field-90_2": ""  # 生JSONにあったフィールドも保持
-                    }
+                    # 画面の入力値で上書き
+                    rec_dict["field-90_1"] = str(row_90["配本日"]) if pd.notna(row_90["配本日"]) else ""
+                    rec_dict["field-90_3"] = str(row_90["折本日"]) if pd.notna(row_90["折本日"]) else ""
+                    rec_dict["field-90_4"] = str(row_90["無線日"]) if pd.notna(row["無線日"]) else ""
+                    rec_dict["field-90_5"] = str(row_90["三方日"]) if pd.notna(row["三方日"]) else ""
+                    rec_dict["field-90_6"] = str(row_90["仕上日"]) if pd.notna(row["仕上日"]) else ""
+                    rec_dict["field-90_7"] = bool(row_90["チェック"])
+                    rec_dict["field-90_9"] = str(row_90["備考"]) if pd.notna(row["備考"]) else ""
+                    
+                    item_90["record"] = rec_dict
                     sub90_list.append(item_90)
+                else:
+                    sub90_list.append({
+                        "record": {
+                            "field-90_1": str(row_90["配本日"]) if pd.notna(row_90["配本日"]) else "",
+                            "field-90_3": str(row_90["折本日"]) if pd.notna(row["折本日"]) else "",
+                            "field-90_4": str(row_90["無線日"]) if pd.notna(row["無線日"]) else "",
+                            "field-90_5": str(row_90["三方日"]) if pd.notna(row["三方日"]) else "",
+                            "field-90_6": str(row_90["仕上日"]) if pd.notna(row["仕上日"]) else "",
+                            "field-90_7": bool(row_90["チェック"]),
+                            "field-90_9": str(row_90["備考"]) if pd.notna(row["備考"]) else "",
+                            "field-90_2": ""
+                        }
+                    })
+
+                # 2. field-88 の構築
+                orig_sub_88 = original_rec.get("field-88", [])
+                sub88_list = []
+                if isinstance(orig_sub_88, list) and len(orig_sub_88) > 0:
+                    item_88 = copy.deepcopy(orig_sub_88[0])
+                    rec_dict = item_88.get("record", {})
                     
-                    # 💡 2. 納品 (field-88): recordSubId と record の入れ子構造で構築
-                    item_88 = {}
-                    if row.get("_id_88") and str(row["_id_88"]).strip() not in ["", "nan", "None"]:
-                        item_88["recordSubId"] = str(row["_id_88"])
+                    rec_dict["field-88_2"] = str(row_90["納品日"]) if pd.notna(row_90["納品日"]) else ""
+                    rec_dict["field-88_4"] = str(int(row_90["納品数"])) if str(row_90["納品数"]).isdigit() else "0"
                     
-                    item_88["record"] = {
-                        "field-88_1": "1",
-                        "field-88_2": str(row["納品日"]) if pd.notna(row["納品日"]) else "",
-                        "field-88_3": "本書",
-                        "field-88_4": str(int(row["納品数"])) if str(row["納品数"]).isdigit() else "0",
-                        "field-88_5": "",
-                        "field-88_6": []
-                    }
+                    item_88["record"] = rec_dict
                     sub88_list.append(item_88)
-                        
-                    # 💡 3. 売上 (field-89): recordSubId と record の入れ子構造で構築
-                    item_89 = {}
-                    if row.get("_id_89") and str(row["_id_89"]).strip() not in ["", "nan", "None"]:
-                        item_89["recordSubId"] = str(row["_id_89"])
+                else:
+                    sub88_list.append({
+                        "record": {
+                            "field-88_1": "1",
+                            "field-88_2": str(row_90["納品日"]) if pd.notna(row_90["納品日"]) else "",
+                            "field-88_3": "本書",
+                            "field-88_4": str(int(row_90["納品数"])) if str(row_90["納品数"]).isdigit() else "0",
+                            "field-88_5": "",
+                            "field-88_6": []
+                        }
+                    })
+
+                # 3. field-89 の構築
+                orig_sub_89 = original_rec.get("field-89", [])
+                sub89_list = []
+                if isinstance(orig_sub_89, list) and len(orig_sub_89) > 0:
+                    item_89 = copy.deepcopy(orig_sub_89[0])
+                    rec_dict = item_89.get("record", {})
                     
-                    item_89["record"] = {
-                        "field-89_1": str(row["売上日"]) if pd.notna(row["売上日"]) else "",
-                        "field-89_2": "",
-                        "field-89_3": str(int(row["請求数量"])) if str(row["請求数量"]).isdigit() else "0",
-                        "field-89_4": "",
-                        "field-89_5": "0",
-                        "field-89_6": "0",
-                        "field-89_7": ""
-                    }
+                    rec_dict["field-89_1"] = str(row_90["売上日"]) if pd.notna(row_90["売上日"]) else ""
+                    rec_dict["field-89_3"] = str(int(row_90["請求数量"])) if str(row_90["請求数量"]).isdigit() else "0"
+                    
+                    item_89["record"] = rec_dict
                     sub89_list.append(item_89)
+                else:
+                    sub89_list.append({
+                        "record": {
+                            "field-89_1": str(row_90["売上日"]) if pd.notna(row_90["売上日"]) else "",
+                            "field-89_2": "",
+                            "field-89_3": str(int(row_90["請求数量"])) if str(row_90["請求数量"]).isdigit() else "0",
+                            "field-89_4": "",
+                            "field-89_5": "0",
+                            "field-89_6": "0",
+                            "field-89_7": ""
+                        }
+                    })
 
                 record_payload["field-90"] = sub90_list
                 record_payload["field-88"] = sub88_list
@@ -342,6 +376,9 @@ with tab1:
                     "record": record_payload
                 }
                 
+                with st.expander(f"📤 【確認】レコードID {record_id} の送信ペイロード"):
+                    st.json(payload)
+
                 try:
                     res = requests.put(update_url, headers=headers, json=payload, timeout=15)
                     if res.status_code in [200, 204]:
