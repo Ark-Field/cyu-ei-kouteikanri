@@ -20,14 +20,23 @@ else:
 
 APP_ID = 34  # @ポケット対象アプリID
 
-# 3. APIデータ取得 ＆ 日付正規化付き期間フィルタリング関数
+# 3. APIデータ取得 ＆ 件数拡張 ＆ 日付正規化付き期間フィルタリング関数
 def fetch_pocket_records(start_date=None, end_date=None):
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
     headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
     
+    # 💡 Pleasanter APIのデフォルト200件制限を突破するため最大件数（2000件）を指定
+    payload = {
+        "Count": 2000
+    }
+    
     try:
-        # まずGETリクエストでデータを取得
-        response = requests.get(url, headers=headers, timeout=20)
+        # POSTリクエストでCountを指定して取得を試みる
+        response = requests.post(url, headers=headers, json=payload, timeout=20)
+        
+        if response.status_code != 200:
+            # 失敗した場合はGETでフォールバック
+            response = requests.get(url, headers=headers, timeout=20)
         
         if response.status_code == 200:
             result = response.json()
@@ -59,7 +68,6 @@ def fetch_pocket_records(start_date=None, end_date=None):
                     # 💡 日付の正規化処理（スラッシュをハイフンに置換し、YYYY-MM-DD形式に統一）
                     r_date = raw_date_str.replace("/", "-")[:10]
                     
-                    # 形式が合致しているか簡易チェックして比較
                     if len(r_date) == 10 and (start_str <= r_date <= end_str):
                         filtered_records.append(r)
                 
@@ -86,11 +94,11 @@ tab1, tab2, tab3 = st.tabs([
 with tab1:
     st.header("📋 受注データ一覧（受注日 `field-1` 期間検索）")
     
-    # デフォルトの検索範囲（例: 2026年10月1日 〜 10月31日）
+    # デフォルトの検索範囲（テストデータの10月に設定）
     default_start = datetime(2026, 10, 1).date()
     default_end = datetime(2026, 10, 31).date()
     
-    st.write("🔍 **受注日の期間を指定し、「検索実行」ボタンを押すと該当データを取得します**")
+    st.write("🔍 **受注日の期間を指定し、「検索実行」ボタンを押すと該当データを取得します（API負荷軽減）**")
     
     c1, c2, c3 = st.columns([2, 2, 1])
     with c1:
@@ -249,4 +257,4 @@ with tab3:
         </html>
         """
         st.success("請求書PDFの準備ができました！")
-        st.download_button("📥 請求書PDFをダウンロード", data=html_content.encode("utf-8"), file_name=f"請求書_{field_2}.html", mime="text/html")
+        st.download_button("📥 請求書PDFをダウンロード", data=inv_html.encode("utf-8"), file_name=f"請求書_{field_2}.html", mime="text/html")
