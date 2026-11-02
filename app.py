@@ -282,68 +282,40 @@ with tab1:
                 sub89_list = []
                 
                 for _, row in group_df.iterrows():
-                    # 配本・工程明細
-                    if row.get("_id_90") or pd.notna(row.get("配本日")) or pd.notna(row.get("折本日")) or pd.notna(row.get("無線日")) or pd.notna(row.get("三方日")) or pd.notna(row.get("仕上日")) or str(row.get("備考", "")).strip() != "":
-                        item_90 = {}
-                        if row.get("_id_90") and str(row["_id_90"]).strip() not in ["", "nan", "None"]:
-                            item_90["Id"] = row["_id_90"]
-                        item_90.update({
-                            "field-90_1": str(row["配本日"]) if pd.notna(row["配本日"]) else "",
-                            "field-90_3": str(row["折本日"]) if pd.notna(row["折本日"]) else "",
-                            "field-90_4": str(row["無線日"]) if pd.notna(row["無線日"]) else "",
-                            "field-90_5": str(row["三方日"]) if pd.notna(row["三方日"]) else "",
-                            "field-90_6": str(row["仕上日"]) if pd.notna(row["仕上日"]) else "",
-                            "field-90_7": bool(row["チェック"]),
-                            "field-90_9": str(row["備考"]) if pd.notna(row["備考"]) else ""
-                        })
-                        sub90_list.append(item_90)
-                    
-                    # 納品明細
-                    if row.get("_id_88") or pd.notna(row.get("納品日")) or str(row.get("納品数", "")).strip() != "":
-                        item_88 = {}
-                        if row.get("_id_88") and str(row["_id_88"]).strip() not in ["", "nan", "None"]:
-                            item_88["Id"] = row["_id_88"]
-                        item_88.update({
-                            "field-88_2": str(row["納品日"]) if pd.notna(row["納品日"]) else "",
-                            "field-88_4": int(row["納品数"]) if str(row["納品数"]).isdigit() else 0
-                        })
-                        sub88_list.append(item_88)
-                        
-                    # 売上明細
-                    if row.get("_id_89") or pd.notna(row.get("売上日")) or str(row.get("請求数量", "")).strip() != "":
-                        item_89 = {}
-                        if row.get("_id_89") and str(row["_id_89"]).strip() not in ["", "nan", "None"]:
-                            item_89["Id"] = row["_id_89"]
-                        item_89.update({
-                            "field-89_1": str(row["売上日"]) if pd.notna(row["売上日"]) else "",
-                            "field-89_3": int(row["請求数量"]) if str(row["請求数量"]).isdigit() else 0
-                        })
-                        sub89_list.append(item_89)
-
-                # 💡 サブテーブルが空の場合の必須エラー（400 Bad Request）回避用ガード
-                if not sub90_list:
-                    sub90_item = {}
-                    if first_row.get("_id_90") and str(first_row["_id_90"]).strip() not in ["", "nan", "None"]:
-                        sub90_item["Id"] = first_row["_id_90"]
-                    sub90_item.update({
-                        "field-90_1": "", "field-90_3": "", "field-90_4": "", 
-                        "field-90_5": "", "field-90_6": "", "field-90_7": False, "field-90_9": ""
+                    # 💡 1. 配本・工程明細（既存の明細レコードIDがある場合は必ず "Id" を持たせる）
+                    item_90 = {}
+                    if row.get("_id_90") and str(row["_id_90"]).strip() not in ["", "nan", "None"]:
+                        item_90["Id"] = row["_id_90"]
+                    item_90.update({
+                        "field-90_1": str(row["配本日"]) if pd.notna(row["配本日"]) else "",
+                        "field-90_3": str(row["折本日"]) if pd.notna(row["折本日"]) else "",
+                        "field-90_4": str(row["無線日"]) if pd.notna(row["無線日"]) else "",
+                        "field-90_5": str(row["三方日"]) if pd.notna(row["三方日"]) else "",
+                        "field-90_6": str(row["仕上日"]) if pd.notna(row["仕上日"]) else "",
+                        "field-90_7": bool(row["チェック"]),
+                        "field-90_9": str(row["備考"]) if pd.notna(row["備考"]) else ""
                     })
-                    sub90_list.append(sub90_item)
-
-                if not sub88_list:
-                    sub88_item = {}
-                    if first_row.get("_id_88") and str(first_row["_id_88"]).strip() not in ["", "nan", "None"]:
-                        sub88_item["Id"] = first_row["_id_88"]
-                    sub88_item.update({"field-88_2": "", "field-88_4": 0})
-                    sub88_list.append(sub88_item)
-
-                if not sub89_list:
-                    sub89_item = {}
-                    if first_row.get("_id_89") and str(first_row["_id_89"]).strip() not in ["", "nan", "None"]:
-                        sub89_item["Id"] = first_row["_id_89"]
-                    sub89_item.update({"field-89_1": "", "field-89_3": 0})
-                    sub89_list.append(sub89_item)
+                    sub90_list.append(item_90)
+                    
+                    # 💡 2. 納品明細（既存の明細レコードIDがある場合は必ず "Id" を持たせる）
+                    item_88 = {}
+                    if row.get("_id_88") and str(row["_id_88"]).strip() not in ["", "nan", "None"]:
+                        item_88["Id"] = row["_id_88"]
+                    item_88.update({
+                        "field-88_2": str(row["納品日"]) if pd.notna(row["納品日"]) else "",
+                        "field-88_4": int(row["納品数"]) if str(row["納品数"]).isdigit() else 0
+                    })
+                    sub88_list.append(item_88)
+                        
+                    # 💡 3. 売上明細（既存の明細レコードIDがある場合は必ず "Id" を持たせる）
+                    item_89 = {}
+                    if row.get("_id_89") and str(row["_id_89"]).strip() not in ["", "nan", "None"]:
+                        item_89["Id"] = row["_id_89"]
+                    item_89.update({
+                        "field-89_1": str(row["売上日"]) if pd.notna(row["売上日"]) else "",
+                        "field-89_3": int(row["請求数量"]) if str(row["請求数量"]).isdigit() else 0
+                    })
+                    sub89_list.append(item_89)
 
                 record_payload["field-90"] = sub90_list
                 record_payload["field-88"] = sub88_list
@@ -436,4 +408,4 @@ with tab3:
         </html>
         """
         st.success("請求書PDFの準備ができました！")
-        st.download_button("📥 請求書PDFをダウンロード", data=html_content.encode("utf-8"), file_name=f"請求書_{field_2 if 'field_2' in locals() else 'i'}.html", mime="text/html")
+        st.download_button("📥 請求書PDFをダウンロード", data=inv_html.encode("utf-8"), file_name=f"請求書_{field_2 if 'field_2' in locals() else 'i'}.html", mime="text/html")
