@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, date
 
 # 1. ページ基本設定
 st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（更新URL修正版）")
+st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（明細ID保持・同期保存版）")
 
 # 2. Secrets設定
 if "pocket" in st.secrets:
@@ -140,16 +140,22 @@ with tab1:
                 for i in range(max_len):
                     item_90 = sub_90[i] if isinstance(sub_90, list) and len(sub_90) > i else {}
                     rec_90 = item_90.get("record", item_90) if isinstance(item_90, dict) else {}
+                    id_90 = item_90.get("Id", rec_90.get("Id", ""))
                     
                     item_88 = sub_88[i] if isinstance(sub_88, list) and len(sub_88) > i else {}
                     rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
+                    id_88 = item_88.get("Id", rec_88.get("Id", ""))
                     
                     item_89 = sub_89[i] if isinstance(sub_89, list) and len(sub_89) > i else {}
                     rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
+                    id_89 = item_89.get("Id", rec_89.get("Id", ""))
                     
                     flat_data.append({
                         "更新": False,
                         "_record_idx": record_idx,
+                        "_id_90": id_90,
+                        "_id_88": id_88,
+                        "_id_89": id_89,
                         "受注番号": h_ord_no,
                         "受注日": h_ord_date,
                         "出版社名": h_pub,
@@ -162,7 +168,7 @@ with tab1:
                         "三方日": parse_date_safe(rec_90.get("field-90_5")),
                         "仕上日": parse_date_safe(rec_90.get("field-90_6")),
                         "チェック": bool(rec_90.get("field-90_7", False)),
-                        "工程備考": str(rec_90.get("field-90_9", "")),
+                        "備考": str(rec_90.get("field-90_9", "")),
                         "納品日": parse_date_safe(rec_88.get("field-88_2")),
                         "納品数": str(rec_88.get("field-88_4", "")),
                         "売上日": parse_date_safe(rec_89.get("field-89_1")),
@@ -179,6 +185,9 @@ with tab1:
                 column_config={
                     "更新": st.column_config.CheckboxColumn("上書き更新", required=True, help="チェックを入れた行のみ@pocketに保存します"),
                     "_record_idx": None,
+                    "_id_90": None,
+                    "_id_88": None,
+                    "_id_89": None,
                     "受注番号": st.column_config.TextColumn("受注番号"),
                     "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD"),
                     "出版社名": st.column_config.TextColumn("出版社名"),
@@ -191,7 +200,7 @@ with tab1:
                     "三方日": st.column_config.DateColumn("三方日", format="YYYY-MM-DD"),
                     "仕上日": st.column_config.DateColumn("仕上日", format="YYYY-MM-DD"),
                     "チェック": st.column_config.CheckboxColumn("チェック"),
-                    "工程備考": st.column_config.TextColumn("工程備考"),
+                    "備考": st.column_config.TextColumn("備考"),
                     "納品日": st.column_config.DateColumn("納品日", format="YYYY-MM-DD"),
                     "納品数": st.column_config.TextColumn("納品数"),
                     "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
@@ -219,7 +228,7 @@ with tab1:
             sample_rec = {}
             field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
     else:
-        st.info("ℹ️ 上の「検索実行」ボタンを押すとデータが読み込まれます。")
+        st.info("ℹ️ 上のアプリ設定を確認し「検索実行」ボタンを押すとデータが読み込まれます。")
         sample_rec = {}
         field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
 
@@ -244,9 +253,38 @@ with tab1:
                     fail_count += 1
                     continue
                 
-                # 💡 正しいAPIエンドポイント形式（/api/apps/{APP_ID}/records/{record_id}）に修正
                 update_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records/{record_id}"
                 
+                # 💡 明細ID（Id）をそのまま保持して同じ位置に書き戻すペイロード構造
+                sub90_item = {}
+                if row["_id_90"]:
+                    sub90_item["Id"] = row["_id_90"]
+                sub90_item.update({
+                    "field-90_1": str(row["配本日"]) if row["配本日"] else "",
+                    "field-90_3": str(row["折本日"]) if row["折本日"] else "",
+                    "field-90_4": str(row["無線日"]) if row["無線日"] else "",
+                    "field-90_5": str(row["三方日"]) if row["三方日"] else "",
+                    "field-90_6": str(row["仕上日"]) if row["仕上日"] else "",
+                    "field-90_7": bool(row["チェック"]),
+                    "field-90_9": str(row["備考"])
+                })
+                
+                sub88_item = {}
+                if row["_id_88"]:
+                    sub88_item["Id"] = row["_id_88"]
+                sub88_item.update({
+                    "field-88_2": str(row["納品日"]) if row["納品日"] else "",
+                    "field-88_4": int(row["納品数"]) if str(row["納品数"]).isdigit() else 0
+                })
+                
+                sub89_item = {}
+                if row["_id_89"]:
+                    sub89_item["Id"] = row["_id_89"]
+                sub89_item.update({
+                    "field-89_1": str(row["売上日"]) if row["売上日"] else "",
+                    "field-89_3": int(row["請求数量"]) if str(row["請求数量"]).isdigit() else 0
+                })
+
                 payload = {
                     "apiVersion": 1.1,
                     "record": {
@@ -256,6 +294,9 @@ with tab1:
                         "field-13": str(row["書名"]),
                         "field-4": str(row["製本数"]),
                         "field-5": str(row["単価"]),
+                        "field-90": [sub90_item],
+                        "field-88": [sub88_item],
+                        "field-89": [sub89_item],
                     }
                 }
                 
@@ -334,7 +375,7 @@ with tab3:
             <p>単価: ¥{field_5} × 製本数: {field_4}</p>
             <div class="box">
                 <strong>【お振込先】</strong><br>
-                {bank_name} {bank_branch} ({bank_type}) {bank_account}<br>
+                {bank_name} {bank_branch} ({bank_type}） {bank_account}<br>
                 口座名義: {bank_holder}
             </div>
         </body>
