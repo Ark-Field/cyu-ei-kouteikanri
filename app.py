@@ -114,14 +114,13 @@ with tab1:
     
     if api_records is not None:
         if api_records:
-            st.success(f"✨ 該当レコード **{len(api_records)} 件** を取得しました。表のセルを直接ダブルクリック等して編集できます。")
+            st.success(f"✨ 該当レコード **{len(api_records)} 件** を取得しました。表のセルを直接編集できます。")
             
-            # フィールドIDをわかりやすい日本語列名にマッピング
+            # フィールドIDをわかりやすい日本語列名にマッピング（インデックスをそのまま活用）
             summary_data = []
-            for idx, r in enumerate(api_records):
+            for r in api_records:
                 summary_data.append({
                     "選択": False,
-                    "_index": idx,  # 内部識別用
                     "受注番号": str(r.get("field-2", "")),
                     "受注日": str(r.get("field-1", ""))[:10],
                     "出版社名": str(r.get("field-8", "")),
@@ -132,7 +131,7 @@ with tab1:
             
             df_summary = pd.DataFrame(summary_data)
             
-            # st.data_editor で一覧表自体を編集可能に
+            # st.data_editor で一覧表を構築（エラーになる不要な column_config を排除）
             edited_summary_df = st.data_editor(
                 df_summary,
                 num_rows="fixed",
@@ -140,7 +139,6 @@ with tab1:
                 use_container_width=True,
                 column_config={
                     "選択": st.column_config.CheckboxColumn("選択", required=True),
-                    "_index": None,
                     "受注番号": st.column_config.TextColumn("受注番号"),
                     "受注日": st.column_config.TextColumn("受注日 (YYYY-MM-DD)"),
                     "出版社名": st.column_config.TextColumn("出版社名"),
@@ -150,13 +148,12 @@ with tab1:
                 }
             )
             
-            # 選択された行の取得（PDF発行や詳細参照用）
+            # 選択された行のインデックスを取得
             selected_rows = edited_summary_df[edited_summary_df["選択"] == True]
             
             if not selected_rows.empty:
-                target_idx = int(selected_rows.iloc[0]["_index"])
+                target_idx = int(selected_rows.index[0])
                 sample_rec = api_records[target_idx]
-                # ユーザーが一覧で書き換えた内容を反映
                 field_2 = str(selected_rows.iloc[0]["受注番号"])
                 field_1 = str(selected_rows.iloc[0]["受注日"])
                 field_8 = str(selected_rows.iloc[0]["出版社名"])
@@ -166,7 +163,6 @@ with tab1:
                 
                 st.info(f"📌 現在選択中のレコード: **受注番号 {field_2} ({field_13})** （下のタブ2・3のPDF発行に連動しています）")
             else:
-                # デフォルトは先頭行
                 sample_rec = api_records[0]
                 field_2 = str(edited_summary_df.iloc[0]["受注番号"])
                 field_1 = str(edited_summary_df.iloc[0]["受注日"])
