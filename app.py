@@ -20,7 +20,7 @@ else:
 
 APP_ID = 34  # @ポケット対象アプリID
 
-# 3. APIデータ取得関数（"record" 構造に対応）
+# 3. APIデータ取得関数（全件取得・フィルターなし確認版）
 def fetch_pocket_records():
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
     headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
@@ -30,23 +30,18 @@ def fetch_pocket_records():
         if response.status_code == 200:
             result = response.json()
             
-            # @pocketのレスポンス形式（リストまたは辞書）を解析
             raw_items = []
             if isinstance(result, list):
                 raw_items = result
             elif isinstance(result, dict):
                 raw_items = result.get("Data", result.get("Records", result.get("Response", {}).get("Data", [])))
             
-            # 各アイテムから "record" 内のデータをきれいに取り出す
             parsed_records = []
             for item in raw_items:
-                # メタデータ (recordId 等) と record本体 を結合、または record を優先して取得
                 rec_body = item.get("record", {})
                 if not rec_body and isinstance(item, dict):
-                    #もし record キーが無い場合はアイテム自体をそのまま使う
                     rec_body = item
                 
-                # メタデータも保持しておく
                 rec_body["_recordId"] = item.get("recordId", item.get("Id", ""))
                 rec_body["_accessEditUrl"] = item.get("accessEditUrl", "")
                 parsed_records.append(rec_body)
@@ -74,27 +69,22 @@ def fetch_pocket_records():
 
 # 4. タブ構成の定義
 tab1, tab2, tab3 = st.tabs([
-    "📋 タブ1: 受注日検索 ＆ 工程・一覧入力", 
+    "📋 タブ1: 受注検索 ＆ 工程・一覧入力", 
     "📦 タブ2: 今週の納品書発行", 
     "📄 タブ3: 請求書発行（口座UI付き）"
 ])
 
 # ==========================================
-# タブ1：受注日検索 ＆ 一覧入力
+# タブ1：受注検索 ＆ 一覧入力
 # ==========================================
 with tab1:
-    st.header("📋 工程・進捗・日付の入力管理（受注日検索）")
+    st.header("📋 工程・進捗・日付の入力管理（全件取得モード）")
     
-    today = datetime.now().date()
-    c1, c2, c3 = st.columns([2, 2, 1])
+    c1, c2 = st.columns([3, 1])
     with c1:
-        t1_start = st.date_input("受注日（開始）", value=datetime(2020, 1, 1).date(), key="t1_s")
+        st.write("🔍 ボタンを押すと @pocket からすべてのレコードを取得します。")
     with c2:
-        t1_end = st.date_input("受注日（終了）", value=today, key="t1_e")
-    with c3:
-        st.write("")
-        st.write("")
-        search_clicked = st.button("🔄 検索実行", type="primary", key="btn_s1")
+        search_clicked = st.button("🔄 データ再取得", type="primary", key="btn_s1")
 
     if search_clicked or "api_records" not in st.session_state:
         st.session_state["api_records"] = fetch_pocket_records()
@@ -103,15 +93,15 @@ with tab1:
     
     if api_records:
         st.success(f"✨ {len(api_records)} 件のレコードを取得しました！")
-        record_labels = [f"受注番号: {r.get('field-2', '不明')} / 書名: {r.get('field-13', '不明')} ({r.get('field-8', '')})" for r in api_records]
-        selected_label = st.selectbox("編集するレコードを選択", options=record_labels)
+        # レコード選択用のセレクトボックス
+        record_labels = [f"受注番号: {r.get('field-2', '不明')} / 受注日: {r.get('field-1', '不明')} / 書名: {r.get('field-13', '不明')} ({r.get('field-8', '')})" for r in api_records]
+        selected_label = st.selectbox("編集するレコードを選択してください", options=record_labels)
         selected_idx = record_labels.index(selected_label)
         sample_rec = api_records[selected_idx]
         
-        # 編集画面から直接@pocketを開けるリンクを表示すると便利です
         edit_url = sample_rec.get("_accessEditUrl", "")
         if edit_url:
-            st.markdown(f"🔗 [このレコードを@pocketで直接編集・確認する]({edit_url})", unsafe_allow_html=True)
+            st.markdown(f"🔗 [このレコードを@pocketで直接開く]({edit_url})", unsafe_allow_html=True)
     else:
         sample_rec = {}
 
@@ -209,4 +199,4 @@ with tab3:
         </html>
         """
         st.success("請求書PDFの準備ができました！")
-        st.download_button("📥 請求書PDFをダウンロード", data=inv_html.encode("utf-8"), file_name=f"請求書_{field_2}.html", mime="text/html")
+        st.download_button("📥 請求書PDFをダウンロード", data=html_content.encode("utf-8"), file_name=f"請求書_{field_2}.html", mime="text/html")
