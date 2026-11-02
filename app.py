@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, date
 
 # 1. ページ基本設定
 st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（カレンダー入力対応版）")
+st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（API更新対応版）")
 
 # 2. Secrets設定
 if "pocket" in st.secrets:
@@ -20,7 +20,7 @@ else:
 
 APP_ID = 34  # @pocket対象アプリID
 
-# 3. APIデータ取得 ＆ クエリパラメータによる期間絞り込み関数
+# 3. APIデータ取得関数
 def fetch_pocket_records(start_date=None, end_date=None):
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
     headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
@@ -33,7 +33,6 @@ def fetch_pocket_records(start_date=None, end_date=None):
     
     try:
         response = requests.get(url, headers=headers, params=params, timeout=20)
-        
         if response.status_code != 200 and "query" in params:
             response = requests.get(url, headers=headers, timeout=20)
         
@@ -50,11 +49,10 @@ def fetch_pocket_records(start_date=None, end_date=None):
                     rec_body = {}
                 
                 merged_body = {**item, **rec_body}
-                merged_body["_recordId"] = item.get("recordId", item.get("Id", ""))
-                merged_body["_accessEditUrl"] = item.get("accessEditUrl", "")
+                # PleasanterのレコードIDの持ち方に合わせて安全に取得
+                merged_body["_recordId"] = item.get("Id", item.get("recordId", item.get("ResultId", "")))
                 parsed_records.append(merged_body)
             
-            # 日付の正規化・期間フィルタリング
             if start_date and end_date and parsed_records:
                 filtered_records = []
                 start_str = start_date.strftime("%Y-%m-%d")
@@ -64,11 +62,9 @@ def fetch_pocket_records(start_date=None, end_date=None):
                     raw_date_str = str(r.get("field-1", ""))
                     if not raw_date_str or raw_date_str.lower() in ["nan", "none"]:
                         continue
-                    
                     r_date = raw_date_str.replace("/", "-")[:10]
                     if len(r_date) == 10 and (start_str <= r_date <= end_str):
                         filtered_records.append(r)
-                
                 return filtered_records
             
             return parsed_records
@@ -86,7 +82,6 @@ tab1, tab2, tab3 = st.tabs([
     "📄 タブ3: 請求書発行（口座UI付き）"
 ])
 
-# 安全な日付パース用ヘルパー
 def parse_date_safe(val):
     if not val or str(val).lower() in ["nan", "none", ""]:
         return None
@@ -104,7 +99,7 @@ with tab1:
     default_start = datetime(2026, 10, 1).date()
     default_end = datetime(2026, 10, 31).date()
     
-    st.write("🔍 **期間を指定して「検索実行」を押してください。日付列はカレンダー入力に対応しています。**")
+    st.write("🔍 **期間を指定して「検索実行」を押してください。編集後、更新したい行にチェックを入れて保存ボタンを押します。**")
     
     c1, c2, c3 = st.columns([2, 2, 1])
     with c1:
@@ -154,7 +149,7 @@ with tab1:
                     rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
                     
                     flat_data.append({
-                        "更新": False,  # チェックした行だけを上書き対象にする安全装置
+                        "更新": False,
                         "_record_idx": record_idx,
                         "受注番号": h_ord_no,
                         "受注日": h_ord_date,
@@ -177,7 +172,6 @@ with tab1:
             
             df_flat = pd.DataFrame(flat_data)
             
-            # st.data_editor（日付列をカレンダー入力に設定）
             edited_flat_df = st.data_editor(
                 df_flat,
                 num_rows="fixed",
@@ -206,10 +200,9 @@ with tab1:
                 }
             )
             
-            # 選択された行の取得（PDF発行用）
             selected_rows = edited_flat_df[edited_flat_df["更新"] == True]
             if selected_rows.empty:
-                selected_rows = edited_flat_df.iloc[[0]]  # チェックがなければ先頭行をデフォルト選択
+                selected_rows = edited_flat_df.iloc[[0]]
             
             target_record_idx = int(selected_rows.iloc[0]["_record_idx"])
             sample_rec = api_records[target_record_idx]
@@ -234,12 +227,52 @@ with tab1:
     st.divider()
     
     if st.button("💾 チェックを入れた行のみ @pocket に上書き保存する", type="primary", key="btn_save_checked"):
-        # 「更新」列にチェックが入っている行だけを抽出して保存処理を実行
         checked_rows = edited_flat_df[edited_flat_df["更新"] == True]
         if checked_rows.empty:
             st.warning("⚠️ 上書き保存する行の「上書き更新」チェックボックスにチェックを入れてください。")
         else:
-            st.success(f"✅ 選択された **{len(checked_rows)} 件** のデータを @pocket に上書き保存しました！")
+            headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json", "Content-Type": "application/json"}
+            success_count = 0
+            fail_count = 0
+            
+            # チェックされた行ごとに@pocketへPUTリクエストを送信
+            for _, row in checked_rows.iterrows():
+                r_idx = int(row["_record_idx"])
+                original_rec = api_records[r_idx]
+                record_id = original_rec.get("_recordId")
+                
+                if not record_id:
+                    fail_count += 1
+                    continue
+                
+                update_url = f"{POCKET_BASE_URL}/api/items/{record_id}"
+                
+                # フォームで編集された値をPleasanterのデータ構造（recordオブジェクト）に組み立て
+                payload = {
+                    "apiVersion": 1.1,
+                    "record": {
+                        "field-2": str(row["受注番号"]),
+                        "field-1": str(row["受注日"]),
+                        "field-8": str(row["出版社名"]),
+                        "field-13": str(row["書名"]),
+                        "field-4": str(row["製本数"]),
+                        "field-5": str(row["単価"]),
+                    }
+                }
+                
+                try:
+                    res = requests.put(update_url, headers=headers, json=payload, timeout=10)
+                    if res.status_code == 200:
+                        success_count += 1
+                    else:
+                        fail_count += 1
+                except Exception:
+                    fail_count += 1
+            
+            if success_count > 0:
+                st.success(f"✅ **{success_count} 件** のデータを @pocket に正常に上書き保存しました！")
+            if fail_count > 0:
+                st.error(f"❌ {fail_count} 件の保存に失敗しました。レコードIDやAPI権限をご確認ください。")
 
 # ==========================================
 # タブ2：納品書発行
