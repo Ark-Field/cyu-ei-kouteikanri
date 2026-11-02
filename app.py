@@ -102,7 +102,7 @@ tab1, tab2, tab3 = st.tabs([
 # ==========================================
 with tab1:
     st.header("📋 受注進捗・日付更新管理エディタ")
-    st.info("💡 既存の受注データに対して、**配本日・折本日・無線日・仕上日・納品日・売上日**などの進捗日付を安全に入力・更新する専用画面です。")
+    st.info("💡 既存の受注データに対して進捗日付を入力・更新します。保存すると自動で最新データが読み込まれ、納品書・請求書にも即座に反映されます。")
     
     default_start = datetime(2026, 10, 1).date()
     default_end = datetime(2026, 10, 31).date()
@@ -384,6 +384,10 @@ with tab1:
             
             if success_count > 0:
                 st.success(f"✅ **{success_count} 件** のレコードデータを @pocket に正常に一括上書き保存しました！")
+                # 💡 秘訣：保存成功した瞬間に自動で最新データを再取得してセッションを更新！
+                st.session_state["api_records"] = fetch_pocket_records(t1_start, t1_end)
+                st.rerun()  # 画面を自動リロードして最新状態を即時反映
+                
             if fail_count > 0:
                 st.error(f"❌ {fail_count} 件の保存に失敗しました。")
 
@@ -394,7 +398,6 @@ with tab2:
     st.header("📦 納品書発行")
     st.info("💡 選択中の受注データの納品情報を確認し、印刷用プレビュー（PDF出力対応）を表示します。")
     
-    # 生データの取得から納品日・納品数をきれいに取り出して表示
     raw_deliv_list = sample_rec.get("field-88", []) if 'sample_rec' in locals() else []
     deliv_table_data = []
     
@@ -577,7 +580,7 @@ with tab3:
                     <th>売上日 / 対象</th>
                     <th class="right">請求数量</th>
                     <th class="right">単価</th>
-                    <th class="right">金額</th>
+                    <th class="right">金額！</th>
                 </tr>
         """
         for _, row in edited_sales.iterrows():
