@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, date
 
 # 1. ページ基本設定
 st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（デバッグ対応版）")
+st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（更新URL修正版）")
 
 # 2. Secrets設定
 if "pocket" in st.secrets:
@@ -49,7 +49,6 @@ def fetch_pocket_records(start_date=None, end_date=None):
                     rec_body = {}
                 
                 merged_body = {**item, **rec_body}
-                # 💡 レコードIDの取得元を複数パターンから確実に抽出
                 merged_body["_recordId"] = item.get("Id", item.get("recordId", item.get("ResultId", rec_body.get("Id", ""))))
                 parsed_records.append(merged_body)
             
@@ -240,15 +239,13 @@ with tab1:
                 original_rec = api_records[r_idx]
                 record_id = original_rec.get("_recordId")
                 
-                # 💡 デバッグ用情報表示
-                st.write(f"🔍 処理中: レコードID = `{record_id}`")
-                
                 if not record_id:
-                    st.error("❌ レコードIDが見つかりませんでした。APIレスポンスの構造を確認してください。")
+                    st.error("❌ レコードIDが見つかりませんでした。")
                     fail_count += 1
                     continue
                 
-                update_url = f"{POCKET_BASE_URL}/api/items/{record_id}"
+                # 💡 正しいAPIエンドポイント形式（/api/apps/{APP_ID}/records/{record_id}）に修正
+                update_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records/{record_id}"
                 
                 payload = {
                     "apiVersion": 1.1,
@@ -264,11 +261,10 @@ with tab1:
                 
                 try:
                     res = requests.put(update_url, headers=headers, json=payload, timeout=10)
-                    st.write(f"📡 送信先URL: `{update_url}` / ステータスコード: `{res.status_code}`")
                     if res.status_code == 200:
                         success_count += 1
                     else:
-                        st.error(f"❌ サーバー応答: {res.text}")
+                        st.error(f"❌ レコードID {record_id} の保存失敗 (ステータス {res.status_code}): {res.text}")
                         fail_count += 1
                 except Exception as e:
                     st.error(f"🚨 例外発生: {e}")
@@ -277,7 +273,7 @@ with tab1:
             if success_count > 0:
                 st.success(f"✅ **{success_count} 件** のデータを @pocket に正常に上書き保存しました！")
             if fail_count > 0:
-                st.error(f"❌ {fail_count} 件の保存に失敗しました。上のデバッグログをご確認ください。")
+                st.error(f"❌ {fail_count} 件の保存に失敗しました。")
 
 # ==========================================
 # タブ2：納品書発行
