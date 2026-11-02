@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 # 1. ページ基本設定
 st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（明細フラット展開版）")
+st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（明細対応版）")
 
 # 2. Secrets設定
 if "pocket" in st.secrets:
@@ -94,7 +94,7 @@ with tab1:
     default_start = datetime(2026, 10, 1).date()
     default_end = datetime(2026, 10, 31).date()
     
-    st.write("🔍 **期間を指定して「検索実行」を押すと、ヘッダーと明細行が横並び（フラット）になった一覧表が表示されます。**")
+    st.write("🔍 **期間を指定して「検索実行」を押すと、ヘッダーと明細行（納品・売上等）が横並びになった一覧表が表示されます。**")
     
     c1, c2, c3 = st.columns([2, 2, 1])
     with c1:
@@ -116,7 +116,7 @@ with tab1:
         if api_records:
             st.success(f"✨ 親レコード **{len(api_records)} 件** を取得しました。明細を展開してフラット表示します。")
             
-            # ヘッダー情報とサブテーブル（明細）を結合してフラットなリストを作成
+            # ヘッダー情報とサブテーブル（field-88 納品 / field-89 売上 / field-90 工程）を結合してフラットなリストを作成
             flat_data = []
             for record_idx, r in enumerate(api_records):
                 h_ord_no = str(r.get("field-2", ""))
@@ -126,9 +126,11 @@ with tab1:
                 h_qty = str(r.get("field-4", ""))
                 h_price = str(r.get("field-5", ""))
                 
-                # サブテーブル（例: field-88 納品明細 または field-90 工程など、存在するものを使用）
-                # ここでは代表例として field-88 や Results2 などを安全に取得
-                sub_items = r.get("Results2", r.get("field-88", []))
+                # 明細2（field-88: 納品日, 納品数）を優先して展開
+                sub_items = r.get("field-88", [])
+                if not isinstance(sub_items, list) or len(sub_items) == 0:
+                    # 代替として明細3（field-89: 売上日, 請求数量）もチェック
+                    sub_items = r.get("field-89", [])
                 
                 if isinstance(sub_items, list) and len(sub_items) > 0:
                     for sub_idx, sub in enumerate(sub_items):
@@ -136,6 +138,10 @@ with tab1:
                             sub_rec = sub.get("record", sub)
                         else:
                             sub_rec = {}
+                        
+                        # 正式なフィールドIDから値を取得
+                        d_date = str(sub_rec.get("field-88_2", sub_rec.get("field-89_1", "")))[:10]
+                        d_qty = str(sub_rec.get("field-88_4", sub_rec.get("field-89_3", h_qty)))
                         
                         flat_data.append({
                             "選択": False,
@@ -146,11 +152,11 @@ with tab1:
                             "書名": h_title,
                             "製本数": h_qty,
                             "単価": h_price,
-                            "明細ID/項目": str(sub_rec.get("field-88_2", sub_rec.get("項目", f"明細-{sub_idx+1}"))),
-                            "明細数量": str(sub_rec.get("field-88_4", sub_rec.get("数量", h_qty)))
+                            "明細日付(納品/売上)": d_date,
+                            "明細数量": d_qty
                         })
                 else:
-                    # 明細がない場合はヘッダーのみ1行として展開
+                    # 明細がない場合はヘッダーのみ1行として展開（明細が2行あればヘッダー付きで2行生成されます）
                     flat_data.append({
                         "選択": False,
                         "_record_idx": record_idx,
@@ -160,7 +166,7 @@ with tab1:
                         "書名": h_title,
                         "製本数": h_qty,
                         "単価": h_price,
-                        "明細ID/項目": "（明細なし）",
+                        "明細日付(納品/売上)": "",
                         "明細数量": h_qty
                     })
             
@@ -181,7 +187,7 @@ with tab1:
                     "書名": st.column_config.TextColumn("書名"),
                     "製本数": st.column_config.TextColumn("製本数"),
                     "単価": st.column_config.TextColumn("単価"),
-                    "明細ID/項目": st.column_config.TextColumn("明細項目"),
+                    "明細日付(納品/売上)": st.column_config.TextColumn("明細日付"),
                     "明細数量": st.column_config.TextColumn("明細数量"),
                 }
             )
@@ -229,8 +235,8 @@ with tab1:
 # ==========================================
 with tab2:
     st.header("📦 納品書発行")
-    default_deliv = sample_rec.get("Results2", sample_rec.get("field-88", [{"納品先": "", "数量": 0}]))
-    edited_deliv = st.data_editor(pd.DataFrame(default_deliv) if default_deliv else pd.DataFrame([{"納品先": "", "数量": 0}]), num_rows="dynamic", key="editor_deliv", use_container_width=True)
+    default_deliv = sample_rec.get("field-88", [{"納品日": "", "納品数": 0}])
+    edited_deliv = st.data_editor(pd.DataFrame(default_deliv) if default_deliv else pd.DataFrame([{"納品日": "", "納品数": 0}]), num_rows="dynamic", key="editor_deliv", use_container_width=True)
     
     if st.button("🚀 選択中レコードの納品書PDFを生成する", type="primary", key="btn_pdf_deliv"):
         html_content = f"""
@@ -262,8 +268,8 @@ with tab3:
     with bc3:
         bank_holder = st.text_input("口座名義", value="カ）アークフィールド", key="b_holder")
 
-    default_sales = sample_rec.get("Results3", sample_rec.get("field-89", [{"項目": "", "金額": 0}]))
-    edited_sales = st.data_editor(pd.DataFrame(default_sales) if default_sales else pd.DataFrame([{"項目": "", "金額": 0}]), num_rows="dynamic", key="editor_sales", use_container_width=True)
+    default_sales = sample_rec.get("field-89", [{"売上日": "", "請求数量": 0}])
+    edited_sales = st.data_editor(pd.DataFrame(default_sales) if default_sales else pd.DataFrame([{"売上日": "", "請求数量": 0}]), num_rows="dynamic", key="editor_sales", use_container_width=True)
     
     if st.button("🚀 振込先口座付き請求書PDFを生成する", type="primary", key="btn_pdf_invoice"):
         try:
