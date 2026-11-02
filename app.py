@@ -303,11 +303,11 @@ with tab1:
                         "record": {
                             "field-90_1": str(row_90["配本日"]) if pd.notna(row_90["配本日"]) else "",
                             "field-90_3": str(row_90["折本日"]) if pd.notna(row_90["折本日"]) else "",
-                            "field-90_4": str(row_90["無線日"]) if pd.notna(row["無線日"]) else "",
-                            "field-90_5": str(row_90["三方日"]) if pd.notna(row["三方日"]) else "",
-                            "field-90_6": str(row_90["仕上日"]) if pd.notna(row["仕上日"]) else "",
+                            "field-90_4": str(row_90["無線日"]) if pd.notna(row_90["無線日"]) else "",
+                            "field-90_5": str(row_90["三方日"]) if pd.notna(row_90["三方日"]) else "",
+                            "field-90_6": str(row_90["仕上日"]) if pd.notna(row_90["仕上日"]) else "",
                             "field-90_7": bool(row_90["チェック"]),
-                            "field-90_9": str(row_90["備考"]) if pd.notna(row["備考"]) else "",
+                            "field-90_9": str(row_90["備考"]) if pd.notna(row_90["備考"]) else "",
                             "field-90_2": ""
                         }
                     })
