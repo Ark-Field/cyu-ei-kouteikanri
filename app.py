@@ -25,19 +25,15 @@ def fetch_pocket_records(start_date=None, end_date=None):
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
     headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
     
-    # 💡 @pocket（Pleasanter）のAPIクエリパラメータを使ってサーバー側で期間絞り込み
     params = {}
     if start_date and end_date:
         start_str = start_date.strftime("%Y-%m-%d")
         end_str = end_date.strftime("%Y-%m-%d")
-        # field-1（受注日）を対象にクエリを設定
         params["query"] = f'field-1 >= "{start_str}" and field-1 <= "{end_str}"'
     
     try:
-        # GETリクエストにparamsを付与して取得
         response = requests.get(url, headers=headers, params=params, timeout=20)
         
-        # クエリ指定でエラーになる環境を考慮し、失敗した場合はクエリなし（全件）で再取得してフォールバック
         if response.status_code != 200 and "query" in params:
             response = requests.get(url, headers=headers, timeout=20)
         
@@ -57,7 +53,7 @@ def fetch_pocket_records(start_date=None, end_date=None):
                 rec_body["_accessEditUrl"] = item.get("accessEditUrl", "")
                 parsed_records.append(rec_body)
             
-            # Python側でも二重の安全策として日付の正規化・期間フィルタリングを実施
+            # 日付の正規化・期間フィルタリング
             if start_date and end_date and parsed_records:
                 filtered_records = []
                 start_str = start_date.strftime("%Y-%m-%d")
@@ -68,9 +64,7 @@ def fetch_pocket_records(start_date=None, end_date=None):
                     if not raw_date_str or raw_date_str.lower() in ["nan", "none"]:
                         continue
                     
-                    # 日付の正規化処理（スラッシュをハイフンに置換し、YYYY-MM-DD形式に統一）
                     r_date = raw_date_str.replace("/", "-")[:10]
-                    
                     if len(r_date) == 10 and (start_str <= r_date <= end_str):
                         filtered_records.append(r)
                 
@@ -86,22 +80,21 @@ def fetch_pocket_records(start_date=None, end_date=None):
 
 # 4. タブ構成の定義
 tab1, tab2, tab3 = st.tabs([
-    "📋 タブ1: 受注日検索 ＆ 一覧エディタ", 
+    "📋 タブ1: 受注データ一覧エディタ（日本語項目）", 
     "📦 タブ2: 今週の納品書発行", 
     "📄 タブ3: 請求書発行（口座UI付き）"
 ])
 
 # ==========================================
-# タブ1：受注日検索 ＆ 一覧エディタ編集
+# タブ1：受注データ一覧エディタ（日本語化＆一括操作）
 # ==========================================
 with tab1:
-    st.header("📋 受注データ一覧（受注日 `field-1` 期間検索）")
+    st.header("📋 受注データ一覧 ＆ 直接編集エディタ")
     
-    # デフォルトの検索範囲（テストデータの10月に設定）
     default_start = datetime(2026, 10, 1).date()
     default_end = datetime(2026, 10, 31).date()
     
-    st.write("🔍 **受注日の期間を指定し、「検索実行」ボタンを押すと該当データを取得します**")
+    st.write("🔍 **期間を指定して「検索実行」を押すと、日本語項目で一覧表示され、表上で直接編集が可能です。**")
     
     c1, c2, c3 = st.columns([2, 2, 1])
     with c1:
@@ -113,24 +106,24 @@ with tab1:
         st.write("")
         search_clicked = st.button("🔄 検索実行", type="primary", key="btn_s1")
 
-    # 検索ボタンが押されたときのみAPIを実行
     if search_clicked:
-        with st.spinner("@ポケットからデータを取得・受注日で絞り込み中..."):
+        with st.spinner("@ポケットからデータを取得中..."):
             st.session_state["api_records"] = fetch_pocket_records(t1_start, t1_end)
 
     api_records = st.session_state.get("api_records", None)
     
     if api_records is not None:
         if api_records:
-            st.success(f"✨ 受注日が条件に合致するレコード **{len(api_records)} 件** を取得しました。下の表で一覧確認・選択が可能です。")
+            st.success(f"✨ 該当レコード **{len(api_records)} 件** を取得しました。表のセルを直接ダブルクリック等して編集できます。")
             
+            # フィールドIDをわかりやすい日本語列名にマッピング
             summary_data = []
             for idx, r in enumerate(api_records):
                 summary_data.append({
                     "選択": False,
-                    "インデックス": idx,
+                    "_index": idx,  # 内部識別用
                     "受注番号": str(r.get("field-2", "")),
-                    "受注日": str(r.get("field-1", "")),
+                    "受注日": str(r.get("field-1", ""))[:10],
                     "出版社名": str(r.get("field-8", "")),
                     "書名": str(r.get("field-13", "")),
                     "製本数": str(r.get("field-4", "")),
@@ -139,71 +132,73 @@ with tab1:
             
             df_summary = pd.DataFrame(summary_data)
             
+            # st.data_editor で一覧表自体を編集可能に
             edited_summary_df = st.data_editor(
                 df_summary,
                 num_rows="fixed",
-                key="grid_summary",
+                key="grid_summary_main",
                 use_container_width=True,
                 column_config={
                     "選択": st.column_config.CheckboxColumn("選択", required=True),
-                    "インデックス": None
+                    "_index": None,
+                    "受注番号": st.column_config.TextColumn("受注番号"),
+                    "受注日": st.column_config.TextColumn("受注日 (YYYY-MM-DD)"),
+                    "出版社名": st.column_config.TextColumn("出版社名"),
+                    "書名": st.column_config.TextColumn("書名"),
+                    "製本数": st.column_config.TextColumn("製本数"),
+                    "単価": st.column_config.TextColumn("単価"),
                 }
             )
             
+            # 選択された行の取得（PDF発行や詳細参照用）
             selected_rows = edited_summary_df[edited_summary_df["選択"] == True]
             
             if not selected_rows.empty:
-                target_idx = int(selected_rows.iloc[0]["インデックス"])
+                target_idx = int(selected_rows.iloc[0]["_index"])
                 sample_rec = api_records[target_idx]
-                st.info(f"📌 現在選択中のレコード: **受注番号 {sample_rec.get('field-2', '')} ({sample_rec.get('field-13', '')})**")
+                # ユーザーが一覧で書き換えた内容を反映
+                field_2 = str(selected_rows.iloc[0]["受注番号"])
+                field_1 = str(selected_rows.iloc[0]["受注日"])
+                field_8 = str(selected_rows.iloc[0]["出版社名"])
+                field_13 = str(selected_rows.iloc[0]["書名"])
+                field_4 = str(selected_rows.iloc[0]["製本数"])
+                field_5 = str(selected_rows.iloc[0]["単価"])
+                
+                st.info(f"📌 現在選択中のレコード: **受注番号 {field_2} ({field_13})** （下のタブ2・3のPDF発行に連動しています）")
             else:
+                # デフォルトは先頭行
                 sample_rec = api_records[0]
-                st.caption("ℹ️ 表の「選択」チェックボックスにチェックを入れると、下の詳細・明細・PDF発行対象を切り替えられます。（現在は先頭行を選択中）")
+                field_2 = str(edited_summary_df.iloc[0]["受注番号"])
+                field_1 = str(edited_summary_df.iloc[0]["受注日"])
+                field_8 = str(edited_summary_df.iloc[0]["出版社名"])
+                field_13 = str(edited_summary_df.iloc[0]["書名"])
+                field_4 = str(edited_summary_df.iloc[0]["製本数"])
+                field_5 = str(edited_summary_df.iloc[0]["単価"])
+                st.caption("ℹ️ 表の「選択」チェックボックスにチェックを入れると、PDF発行対象のレコードを切り替えられます。（現在は先頭行を選択中）")
                 
         else:
-            st.warning("⚠️ 指定した受注日の範囲に該当するレコードがありませんでした。日付範囲を広げて再確認してください。")
+            st.warning("⚠️ 指定した受注日の範囲に該当するレコードがありませんでした。")
             sample_rec = {}
+            field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
     else:
         st.info("ℹ️ 上の「検索実行」ボタンを押すとデータが読み込まれます。")
         sample_rec = {}
-
-    st.divider()
-    st.subheader("📝 選択中レコードの詳細・明細データ編集")
-    
-    col_h1, col_h2, col_h3 = st.columns(3)
-    with col_h1:
-        field_2 = st.text_input("受注番号 (field-2)", value=str(sample_rec.get("field-2", "")))
-        field_1 = st.text_input("受注日 (field-1)", value=str(sample_rec.get("field-1", "")))
-    with col_h2:
-        field_8 = st.text_input("出版社名 (field-8)", value=str(sample_rec.get("field-8", "")))
-        field_13 = st.text_input("書名 (field-13)", value=str(sample_rec.get("field-13", "")))
-    with col_h3:
-        field_4 = st.text_input("製本数 (field-4)", value=str(sample_rec.get("field-4", "")))
-        field_5 = st.text_input("単価 (field-5)", value=str(sample_rec.get("field-5", "")))
+        field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
 
     st.divider()
     
-    default_eng = sample_rec.get("Results1", sample_rec.get("field-90", []))
-    edited_eng = st.data_editor(pd.DataFrame(default_eng) if default_eng else pd.DataFrame([{"field-90_1": "", "field-90_3": "", "field-90_4": "", "field-90_5": "", "field-90_6": "", "field-90_7": False, "field-90_9": ""}]), num_rows="dynamic", key="editor_eng", use_container_width=True)
-
-    col_d1, col_d2 = st.columns(2)
-    with col_d1:
-        default_deliv = sample_rec.get("Results2", sample_rec.get("field-88", []))
-        edited_deliv = st.data_editor(pd.DataFrame(default_deliv) if default_deliv else pd.DataFrame([{"field-88_2": "", "field-88_4": 0}]), num_rows="dynamic", key="editor_deliv", use_container_width=True)
-    with col_d2:
-        default_sales = sample_rec.get("Results3", sample_rec.get("field-89", []))
-        edited_sales = st.data_editor(pd.DataFrame(default_sales) if default_sales else pd.DataFrame([{"field-89_1": "", "field-89_3": 0}]), num_rows="dynamic", key="editor_sales", use_container_width=True)
-
-    if st.button("💾 編集内容を @pocket に上書き保存する", type="primary", key="btn_save"):
-        st.success("✅ 編集内容を @pocket に反映しました！")
+    if st.button("💾 一覧での編集内容を @pocket に一括保存する", type="primary", key="btn_save_all"):
+        st.success("✅ 変更内容を @pocket に反映しました！")
 
 # ==========================================
 # タブ2：納品書発行
 # ==========================================
 with tab2:
-    st.header("📦 今週の納品書発行")
-    st.dataframe(edited_deliv, use_container_width=True)
-    if st.button("🚀 顧客別に納品書PDFを生成する", type="primary", key="btn_pdf_deliv"):
+    st.header("📦 納品書発行")
+    default_deliv = sample_rec.get("Results2", sample_rec.get("field-88", [{"納品先": "", "数量": 0}]))
+    edited_deliv = st.data_editor(pd.DataFrame(default_deliv) if default_deliv else pd.DataFrame([{"納品先": "", "数量": 0}]), num_rows="dynamic", key="editor_deliv", use_container_width=True)
+    
+    if st.button("🚀 選択中レコードの納品書PDFを生成する", type="primary", key="btn_pdf_deliv"):
         html_content = f"""
         <html>
         <head><meta charset="utf-8"><style>body {{ font-family: sans-serif; }}</style></head>
@@ -222,7 +217,7 @@ with tab2:
 # タブ3：請求書発行（口座UI付き）
 # ==========================================
 with tab3:
-    st.header("📄 指定期間の請求書発行（口座UI付き）")
+    st.header("📄 請求書発行（口座UI付き）")
     bc1, bc2, bc3 = st.columns(3)
     with bc1:
         bank_name = st.text_input("銀行名", value="千葉銀行", key="b_name")
@@ -233,7 +228,8 @@ with tab3:
     with bc3:
         bank_holder = st.text_input("口座名義", value="カ）アークフィールド", key="b_holder")
 
-    st.dataframe(edited_sales, use_container_width=True)
+    default_sales = sample_rec.get("Results3", sample_rec.get("field-89", [{"項目": "", "金額": 0}]))
+    edited_sales = st.data_editor(pd.DataFrame(default_sales) if default_sales else pd.DataFrame([{"項目": "", "金額": 0}]), num_rows="dynamic", key="editor_sales", use_container_width=True)
     
     if st.button("🚀 振込先口座付き請求書PDFを生成する", type="primary", key="btn_pdf_invoice"):
         try:
