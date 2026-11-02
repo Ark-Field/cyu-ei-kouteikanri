@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 # 1. ページ基本設定
 st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @ポケット連動 受注・工程・納品・請求管理システム")
+st.title("📊 @ポケット連動 受注・工程・納品・請求管理システム（デバッグモード）")
 
 # 2. Secrets設定
 if "pocket" in st.secrets:
@@ -20,13 +20,15 @@ else:
 
 APP_ID = 34  # @ポケット対象アプリID
 
-# 3. APIデータ取得関数（全件取得 ＆ 受注日(field-1)による安全な期間フィルタリング）
-def fetch_pocket_records(start_date=None, end_date=None):
+# 3. APIデータ取得関数（全件取得 ＆ デバッグログ出力）
+def fetch_pocket_records():
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
     headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
     
     try:
         response = requests.get(url, headers=headers, timeout=15)
+        st.write(f"📡 APIステータスコード: {response.status_code}")
+        
         if response.status_code == 200:
             result = response.json()
             
@@ -46,24 +48,18 @@ def fetch_pocket_records(start_date=None, end_date=None):
                 rec_body["_accessEditUrl"] = item.get("accessEditUrl", "")
                 parsed_records.append(rec_body)
             
-            # 受注日（field-1）による期間フィルタリング
-            if start_date and end_date and parsed_records:
-                filtered_records = []
-                start_str = start_date.strftime("%Y-%m-%d")
-                end_str = end_date.strftime("%Y-%m-%d")
-                
-                for r in parsed_records:
-                    r_date = str(r.get("field-1", ""))[:10]
-                    # 日付が未設定、または指定期間内のものを抽出
-                    if not r_date or (start_str <= r_date <= end_str):
-                        filtered_records.append(r)
-                return filtered_records
-            
-            return parsed_records
+            if parsed_records:
+                st.success(f"✨ @pocketから {len(parsed_records)} 件のレコードを取得しました！")
+                # 💡 取得した全データのキーと受注日(field-1)の中身を画面に表示
+                st.write("▼ 【デバッグ】取得した全レコードの受注日(field-1)一覧:", 
+                         [{"ID": r.get("_recordId"), "受注番号(field-2)": r.get("field-2"), "受注日(field-1)": r.get("field-1"), "書名(field-13)": r.get("field-13")} for r in parsed_records])
+                return parsed_records
+            else:
+                st.warning("⚠️ レコードが0件です。")
         else:
-            st.warning(f"⚠️ APIエラー: {response.text}")
+            st.error(f"❌ APIエラー: {response.text}")
     except Exception as e:
-        st.info(f"ℹ️ 通信情報: {e}")
+        st.error(f"🚨 通信エラー: {e}")
     
     # フォールバック用モックデータ
     today_str = str(datetime.now().date())
@@ -81,41 +77,31 @@ def fetch_pocket_records(start_date=None, end_date=None):
 
 # 4. タブ構成の定義
 tab1, tab2, tab3 = st.tabs([
-    "📋 タブ1: 受注日検索 ＆ 一覧入力", 
+    "📋 タブ1: 受注検索 ＆ 一覧入力", 
     "📦 タブ2: 今週の納品書発行", 
     "📄 タブ3: 請求書発行（口座UI付き）"
 ])
 
 # ==========================================
-# タブ1：受注日検索 ＆ 一覧入力
+# タブ1：受注検索 ＆ 一覧入力
 # ==========================================
 with tab1:
-    st.header("📋 工程・進捗・日付の入力管理（受注日検索）")
+    st.header("📋 工程・進捗・日付の入力管理（全件直結モード）")
     
-    today = datetime.now().date()
-    # デフォルトは過去の広い範囲（2020年〜今日など、過去データも拾えるように設定）
-    default_start = datetime(2020, 1, 1).date()
-    default_end = today
-    
-    st.write("🔍 **検索クエリ条件設定（受注日 field-1 による絞り込み）**")
-    c1, c2, c3 = st.columns([2, 2, 1])
+    c1, c2 = st.columns([3, 1])
     with c1:
-        t1_start = st.date_input("受注日（開始）", value=default_start, key="t1_s")
+        st.write("🔍 フィルターなしで @pocket の全データを取得して表示します。")
     with c2:
-        t1_end = st.date_input("受注日（終了）", value=default_end, key="t1_e")
-    with c3:
         st.write("")
-        st.write("")
-        search_clicked = st.button("🔄 検索実行", type="primary", key="btn_s1")
+        search_clicked = st.button("🔄 データ再取得", type="primary", key="btn_s1")
 
     if search_clicked or "api_records" not in st.session_state:
-        with st.spinner("@ポケットからデータを検索中..."):
-            st.session_state["api_records"] = fetch_pocket_records(t1_start, t1_end)
+        with st.spinner("@pocketからデータを取得中..."):
+            st.session_state["api_records"] = fetch_pocket_records()
 
     api_records = st.session_state.get("api_records", [])
     
     if api_records:
-        st.success(f"✨ 条件に合致するレコードが {len(api_records)} 件見つかりました！")
         record_labels = [f"受注番号: {r.get('field-2', '不明')} / 受注日: {r.get('field-1', '不明')} / 書名: {r.get('field-13', '不明')} ({r.get('field-8', '')})" for r in api_records]
         selected_label = st.selectbox("編集するレコードを選択してください", options=record_labels)
         selected_idx = record_labels.index(selected_label)
@@ -125,7 +111,6 @@ with tab1:
         if edit_url:
             st.markdown(f"🔗 [このレコードを@pocketで直接開く]({edit_url})", unsafe_allow_html=True)
     else:
-        st.warning("⚠️ 指定した受注日の範囲に該当するレコードがありませんでした。日付範囲を広げて再検索してみてください。")
         sample_rec = {}
 
     st.divider()
@@ -222,4 +207,4 @@ with tab3:
         </html>
         """
         st.success("請求書PDFの準備ができました！")
-        st.download_button("📥 請求書PDFをダウンロード", data=inv_html.encode("utf-8"), file_name=f"請求書_{field_2}.html", mime="text/html")
+        st.download_button("📥 請求書PDFをダウンロード", data=html_content.encode("utf-8"), file_name=f"請求書_{field_2}.html", mime="text/html")
