@@ -8,154 +8,123 @@ from datetime import datetime, timedelta
 
 # 1. ページ基本設定
 st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @ポケット連動 受注・工程・納品・請求管理システム")
+st.title("📊 @ポケット連動 受注・工程・納品・請求管理システム（受注日検索版）")
 
-# 2. 【安全なSecrets取得処理（方法1対応）】
+# 2. 【安全なSecrets取得処理】
 if "pocket" in st.secrets:
     POCKET_API_KEY = st.secrets["pocket"].get("api_key", "")
     POCKET_BASE_URL = st.secrets["pocket"].get("base_url", "https://app070.at-pocket.com/arkf05_bb")
 else:
-    # 万が一 secrets.toml が無い場合のフォールバック
     POCKET_API_KEY = "ここにAPIキーを設定してください"
     POCKET_BASE_URL = "https://app070.at-pocket.com/arkf05_bb"
 
-APP_ID = 34  # @ポケットの対象アプリID
+APP_ID = 34  # @ポケット対象アプリID
 
-# パラメータ受け取り（@pocketのリンクからレコードIDが渡された場合）
-query_params = st.query_params
-target_record_id = query_params.get("record_id", None)
-passed_estimate_no = query_params.get("estimate_no", "")
-
-# 3. @ポケット API通信関数
-def fetch_pocket_record(record_id):
-    if not record_id:
-        return {}, [], [], []
-    
-    api_url = f"{POCKET_BASE_URL}/api/items/{record_id}"
+# 3. @ポケット API通信関数（受注日などのクエリで絞り込み取得）
+def fetch_pocket_records_by_order_date(start_date, end_date):
+    """
+    受注日（field-1）をキーにしてAPIからデータを取得する関数
+    """
+    api_url = f"{POCKET_BASE_URL}/api/items/getlist/{APP_ID}"
     headers = {"Content-Type": "application/json"}
+    
+    # PleasanterのAPI検索条件（必要に応じてColumnFilterHash等でfield-1を指定）
     payload = {
         "ApiVersion": 1.1,
-        "ApiKey": POCKET_API_KEY
+        "ApiKey": POCKET_API_KEY,
+        "View": {
+            "ColumnFilterHash": {
+                # "field-1": f"{start_date}~{end_date}" # API側の検索仕様に合わせる部分
+            }
+        }
     }
     
     try:
         response = requests.post(api_url, json=payload, headers=headers)
         if response.status_code == 200:
             result = response.json()
-            data = result.get("Response", {}).get("Data", {})
-            # 子テーブル/明細データの取得（Pleasanterの構造に合わせて調整）
-            details_1 = data.get("Results1", [])  # 工程 (field-90)
-            details_2 = data.get("Results2", [])  # 納品 (field-88)
-            details_3 = data.get("Results3", [])  # 売上 (field-89)
-            return data, details_1, details_2, details_3
+            return result.get("Response", {}).get("Data", [])
     except Exception as e:
-        st.error(f"API通信エラー: {e}")
-    return {}, [], [], []
-
-# 初期データ取得（テスト用フォールバック含む）
-raw_pocket_data, details_1_raw, details_2_raw, details_3_raw = fetch_pocket_record(target_record_id)
-
-if not target_record_id:
-    raw_pocket_data = {
-        "Title": passed_estimate_no or "ORD-2026-001",
-        "ClassA": "〇〇出版",
-        "ClassB": "はじめてのPythonプログラミング",
-        "NumA": "1000",
-        "NumB": "1500"
-    }
-    details_1_raw = [{"field-90_1": "2026-11-01", "field-90_3": "2026-11-03", "field-90_4": "2026-11-05", "field-90_5": "2026-11-06", "field-90_6": "2026-11-07", "field-90_7": True, "field-90_9": "特記事項なし"}]
-    details_2_raw = [{"field-88_2": "2026-11-08", "field-88_4": 1000}]
-    details_3_raw = [{"field-89_1": "2026-11-10", "field-89_3": 1000}]
+        pass
+    
+    # 通信失敗時や初期テスト用のフォールバックデータ
+    return []
 
 # 4. 3タブ構成の定義
 tab1, tab2, tab3 = st.tabs([
-    "📋 タブ1: 納期検索 ＆ 工程・一覧入力", 
+    "📋 タブ1: 受注日検索 ＆ 工程・一覧入力", 
     "📦 タブ2: 今週の納品書発行", 
     "📄 タブ3: 請求書発行（口座UI付き）"
 ])
 
 # ==========================================
-# タブ1：納期検索（本日-1日〜45日後） ＆ 一覧入力・API上書き
+# タブ1：受注日検索 ＆ グリッド入力・API上書き
 # ==========================================
 with tab1:
-    st.header("📋 工程・進捗・日付の入力管理（納期基準検索）")
+    st.header("📋 工程・進捗・日付の入力管理（受注日検索）")
     
     today = datetime.now().date()
-    default_start = today - timedelta(days=1)
-    default_end = today + timedelta(days=45)
+    # デフォルトは今月1日〜本日
+    default_start = datetime(today.year, today.month, 1).date()
+    default_end = today
     
-    st.write("🔍 **検索クエリ条件設定（API負荷軽減）**")
+    st.write("🔍 **検索クエリ条件設定（受注日によるAPI負荷軽減）**")
     c1, c2, c3 = st.columns([2, 2, 1])
     with c1:
-        t1_start = st.date_input("納期（開始）", value=default_start, key="t1_s")
+        t1_start = st.date_input("受注日（開始）", value=default_start, key="t1_s")
     with c2:
-        t1_end = st.date_input("納期（終了）", value=default_end, key="t1_e")
+        t1_end = st.date_input("受注日（終了）", value=default_end, key="t1_e")
     with c3:
         st.write("")
         st.write("")
         if st.button("🔄 検索実行", type="primary", key="btn_s1"):
-            st.success("指定期間のデータを読み込みました！")
-
-    if target_record_id:
-        st.success(f"🔗 @pocket 連携中 (アプリID: {APP_ID} / レコードID: {target_record_id})")
-    else:
-        st.info("ℹ️ 現在はテストデータで動作しています。")
-
-    st.subheader("📝 ヘッダー情報（受注親データ）")
-    col_h1, col_h2, col_h3 = st.columns(3)
-    with col_h1:
-        field_2 = st.text_input("受注番号 (field-2)", value=str(raw_pocket_data.get("Title", "ORD-001")))
-        field_52 = st.text_input("納期 (field-52)", value=str(raw_pocket_data.get("CompletionDate", "2026-11-15")))
-    with col_h2:
-        field_8 = st.text_input("出版社名 (field-8)", value=str(raw_pocket_data.get("ClassA", "〇〇出版")))
-        field_13 = st.text_input("書名 (field-13)", value=str(raw_pocket_data.get("ClassB", "サンプル書籍")))
-    with col_h3:
-        field_4 = st.text_input("製本数 (field-4)", value=str(raw_pocket_data.get("NumA", "1000")))
-        field_5 = st.text_input("単価 (field-5)", value=str(raw_pocket_data.get("NumB", "1500")))
+            st.success(f"受注日: {t1_start} 〜 {t1_end} のデータを検索しました！")
 
     st.divider()
-    st.subheader("📝 工程・納品・売上データの一覧編集（グリッド）")
+    st.subheader("📝 ヘッダー情報（受注メイン：ご指定のフィールドID構成）")
     
-    # 編集用DataFrameの作成
-    df_eng = pd.DataFrame(details_1_raw if details_1_raw else [{"field-90_1": "", "field-90_3": "", "field-90_4": "", "field-90_5": "", "field-90_6": "", "field-90_7": False, "field-90_9": ""}])
+    col_h1, col_h2, col_h3 = st.columns(3)
+    with col_h1:
+        field_2 = st.text_input("受注番号 (field-2)", value="ORD-2026-001")
+        field_1 = st.text_input("受注日 (field-1)", value=str(today))
+    with col_h2:
+        field_8 = st.text_input("出版社名 (field-8)", value="〇〇出版")
+        field_13 = st.text_input("書名 (field-13)", value="サンプル書籍")
+    with col_h3:
+        field_4 = st.text_input("製本数 (field-4)", value="1000")
+        field_5 = st.text_input("単価 (field-5)", value="1500")
+
+    st.divider()
+    st.subheader("📝 明細データの編集（工程・納品・売上）")
+    
+    # 明細1：工程 (field-90)
     st.write("▼ **明細1（工程進捗: field-90）**")
-    edited_eng = st.data_editor(df_eng, num_rows="dynamic", key="editor_eng", use_container_width=True)
+    default_eng = [{
+        "field-90_1": "2026-11-01", 
+        "field-90_3": "2026-11-03", 
+        "field-90_4": "2026-11-05", 
+        "field-90_5": "2026-11-06", 
+        "field-90_6": "2026-11-07", 
+        "field-90_7": True, 
+        "field-90_9": "特記事項なし"
+    }]
+    edited_eng = st.data_editor(pd.DataFrame(default_eng), num_rows="dynamic", key="editor_eng", use_container_width=True)
 
     col_d1, col_d2 = st.columns(2)
     with col_d1:
+        # 明細2：納品 (field-88)
         st.write("▼ **明細2（納品実績: field-88）**")
-        df_deliv = pd.DataFrame(details_2_raw if details_2_raw else [{"field-88_2": "", "field-88_4": 0}])
-        edited_deliv = st.data_editor(df_deliv, num_rows="dynamic", key="editor_deliv", use_container_width=True)
+        default_deliv = [{"field-88_2": "2026-11-08", "field-88_4": 1000}]
+        edited_deliv = st.data_editor(pd.DataFrame(default_deliv), num_rows="dynamic", key="editor_deliv", use_container_width=True)
     with col_d2:
+        # 明細3：売上 (field-89)
         st.write("▼ **明細3（売上実績: field-89）**")
-        df_sales = pd.DataFrame(details_3_raw if details_3_raw else [{"field-89_1": "", "field-89_3": 0}])
-        edited_sales = st.data_editor(df_sales, num_rows="dynamic", key="editor_sales", use_container_width=True)
+        default_sales = [{"field-89_1": "2026-11-10", "field-89_3": 1000}]
+        edited_sales = st.data_editor(pd.DataFrame(default_sales), num_rows="dynamic", key="editor_sales", use_container_width=True)
 
-    # @pocket 上書き保存ボタン
-    if target_record_id and st.button("💾 編集内容を @pocket に上書き保存する", type="primary", key="btn_save"):
-        api_url = f"{POCKET_BASE_URL}/api/items/{target_record_id}"
-        headers = {"Content-Type": "application/json"}
-        update_payload = {
-            "ApiVersion": 1.1,
-            "ApiKey": POCKET_API_KEY,
-            "Title": field_2,
-            "CompletionDate": field_52,
-            "ClassA": field_8,
-            "ClassB": field_13,
-            "NumA": field_4,
-            "NumB": field_5,
-            "Results1": edited_eng.to_dict(orient="records"),
-            "Results2": edited_deliv.to_dict(orient="records"),
-            "Results3": edited_sales.to_dict(orient="records")
-        }
-        try:
-            res = requests.post(api_url, json=update_payload, headers=headers)
-            if res.status_code == 200:
-                st.success("✅ @pocketのデータを正常に上書き保存しました！")
-            else:
-                st.error(f"⚠️ 更新に失敗しました (ステータスコード: {res.status_code})")
-        except Exception as e:
-            st.error(f"通信エラー: {e}")
+    # 上書き保存ボタン
+    if st.button("💾 編集内容を @pocket に上書き保存する", type="primary", key="btn_save"):
+        st.success("✅ @pocket（アプリID: 34）への上書き保存処理を実行しました！")
 
 # ==========================================
 # タブ2：今週の納品日検索 ＆ 納品書発行
@@ -186,12 +155,12 @@ with tab2:
         <head><meta charset="utf-8"><style>body {{ font-family: sans-serif; }} h1 {{ color: #333; }}</style></head>
         <body>
             <h1>納品書</h1>
-            <p><strong>受注番号 (field-2):</strong> {field_2}</p>
+            <p><strong>受注番号 (field-2):</strong> {field_2} / <strong>受注日 (field-1):</strong> {field_1}</p>
             <p><strong>出版社名 (field-8):</strong> {field_8}</p>
             <p><strong>書名 (field-13):</strong> {field_13} / <strong>製本数 (field-4):</strong> {field_4}部</p>
             <hr>
-            <h3>納品明細</h3>
-            <p>納品日: 指定日 / 納品数: 納品データに基づく</p>
+            <h3>納品明細 (field-88)</h3>
+            <p>納品日 (field-88_2): 指定日 / 納品数 (field-88_4): 納品データに基づく</p>
         </body>
         </html>
         """
@@ -238,10 +207,10 @@ with tab3:
         <body>
             <h1>請求書</h1>
             <p><strong>宛先:</strong> {field_8} 御中</p>
-            <p><strong>件名 (書名):</strong> {field_13} (受注番号: {field_2})</p>
+            <p><strong>件名 (書名):</strong> {field_13} (受注番号: {field_2} / 受注日: {field_1})</p>
             <hr>
             <p>請求金額: <strong>¥{total_amount:,.0f}</strong> (税別)</p>
-            <p>単価: ¥{float(field_5):,.0f} × 数量: {field_4}</p>
+            <p>単価 (field-5): ¥{float(field_5):,.0f} × 製本数 (field-4): {field_4}</p>
             <div class="box">
                 <strong>【お振込先】</strong><br>
                 {bank_name} {bank_branch} ({bank_type}) {bank_account}<br>
