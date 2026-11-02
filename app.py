@@ -228,7 +228,7 @@ with tab1:
             sample_rec = {}
             field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
     else:
-        st.info("ℹ️ 上上のアプリ設定を確認し「検索実行」ボタンを押すとデータが読み込まれます。")
+        st.info("ℹ️ 上のアプリ設定を確認し「検索実行」ボタンを押すとデータが読み込まれます。")
         sample_rec = {}
         field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
 
@@ -267,43 +267,43 @@ with tab1:
                     "field-5": str(row["単価"]),
                 }
                 
-                # 💡 明細1 (field-90: 工程・配本等) の構築
-                sub90_item = {}
-                if row["_id_90"] and str(row["_id_90"]).strip() not in ["", "nan", "None"]:
-                    sub90_item["Id"] = row["_id_90"]
-                
-                sub90_item.update({
-                    "field-90_1": str(row["配本日"]) if pd.notna(row["配本日"]) else "",
-                    "field-90_3": str(row["折本日"]) if pd.notna(row["折本日"]) else "",
-                    "field-90_4": str(row["無線日"]) if pd.notna(row["無線日"]) else "",
-                    "field-90_5": str(row["三方日"]) if pd.notna(row["三方日"]) else "",
-                    "field-90_6": str(row["仕上日"]) if pd.notna(row["仕上日"]) else "",
-                    "field-90_7": bool(row["チェック"]),
-                    "field-90_9": str(row["備考"]) if pd.notna(row["備考"]) else ""
-                })
-                record_payload["field-90"] = [sub90_item]
+                # 💡 明細1 (field-90: 工程・配本等) の構築（既存IDがあるか、データが入力されている場合のみ含める）
+                if (row["_id_90"] and str(row["_id_90"]).strip() not in ["", "nan", "None"]) or pd.notna(row["配本日"]):
+                    sub90_item = {}
+                    if row["_id_90"] and str(row["_id_90"]).strip() not in ["", "nan", "None"]:
+                        sub90_item["Id"] = row["_id_90"]
+                    sub90_item.update({
+                        "field-90_1": str(row["配本日"]) if pd.notna(row["配本日"]) else "",
+                        "field-90_3": str(row["折本日"]) if pd.notna(row["折本日"]) else "",
+                        "field-90_4": str(row["無線日"]) if pd.notna(row["無線日"]) else "",
+                        "field-90_5": str(row["三方日"]) if pd.notna(row["三方日"]) else "",
+                        "field-90_6": str(row["仕上日"]) if pd.notna(row["仕上日"]) else "",
+                        "field-90_7": bool(row["チェック"]),
+                        "field-90_9": str(row["備考"]) if pd.notna(row["備考"]) else ""
+                    })
+                    record_payload["field-90"] = [sub90_item]
 
                 # 💡 明細2 (field-88: 納品) の構築
-                sub88_item = {}
-                if row["_id_88"] and str(row["_id_88"]).strip() not in ["", "nan", "None"]:
-                    sub88_item["Id"] = row["_id_88"]
-                    
-                sub88_item.update({
-                    "field-88_2": str(row["納品日"]) if pd.notna(row["納品日"]) else "",
-                    "field-88_4": int(row["納品数"]) if str(row["納品数"]).isdigit() else 0
-                })
-                record_payload["field-88"] = [sub88_item]
+                if (row["_id_88"] and str(row["_id_88"]).strip() not in ["", "nan", "None"]) or pd.notna(row["納品日"]):
+                    sub88_item = {}
+                    if row["_id_88"] and str(row["_id_88"]).strip() not in ["", "nan", "None"]:
+                        sub88_item["Id"] = row["_id_88"]
+                    sub88_item.update({
+                        "field-88_2": str(row["納品日"]) if pd.notna(row["納品日"]) else "",
+                        "field-88_4": int(row["納品数"]) if str(row["納品数"]).isdigit() else 0
+                    })
+                    record_payload["field-88"] = [sub88_item]
 
-                # 💡 明細3 (field-89: 売上・請求) の構築
-                sub89_item = {}
-                if row["_id_89"] and str(row["_id_89"]).strip() not in ["", "nan", "None"]:
-                    sub89_item["Id"] = row["_id_89"]
-                    
-                sub89_item.update({
-                    "field-89_1": str(row["売上日"]) if pd.notna(row["売上日"]) else "",
-                    "field-89_3": int(row["請求数量"]) if str(row["請求数量"]).isdigit() else 0
-                })
-                record_payload["field-89"] = [sub89_item]
+                # 💡 明細3 (field-89: 売上) の構築
+                if (row["_id_89"] and str(row["_id_89"]).strip() not in ["", "nan", "None"]) or pd.notna(row["売上日"]):
+                    sub89_item = {}
+                    if row["_id_89"] and str(row["_id_89"]).strip() not in ["", "nan", "None"]:
+                        sub89_item["Id"] = row["_id_89"]
+                    sub89_item.update({
+                        "field-89_1": str(row["売上日"]) if pd.notna(row["売上日"]) else "",
+                        "field-89_3": int(row["請求数量"]) if str(row["請求数量"]).isdigit() else 0
+                    })
+                    record_payload["field-89"] = [sub89_item]
 
                 payload = {
                     "apiVersion": 1.1,
