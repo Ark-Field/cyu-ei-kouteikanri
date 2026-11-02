@@ -277,10 +277,6 @@ with tab1:
                     "field-5": str(first_row["単価"]),
                 }
                 
-                # =========================================================
-                # 💡 究極の安全策：既存のサブテーブル構造を丸ごとディープコピーし、
-                #    中の record 値だけを安全に上書きして構築する
-                # =========================================================
                 import copy
                 
                 # 1. field-90 の構築
@@ -289,18 +285,16 @@ with tab1:
                 row_90 = group_df.iloc[0]
                 
                 if isinstance(orig_sub_90, list) and len(orig_sub_90) > 0:
-                    # 既存の構造を丸ごとコピー
                     item_90 = copy.deepcopy(orig_sub_90[0])
                     rec_dict = item_90.get("record", {})
                     
-                    # 画面の入力値で上書き
                     rec_dict["field-90_1"] = str(row_90["配本日"]) if pd.notna(row_90["配本日"]) else ""
                     rec_dict["field-90_3"] = str(row_90["折本日"]) if pd.notna(row_90["折本日"]) else ""
-                    rec_dict["field-90_4"] = str(row_90["無線日"]) if pd.notna(row["無線日"]) else ""
-                    rec_dict["field-90_5"] = str(row_90["三方日"]) if pd.notna(row["三方日"]) else ""
-                    rec_dict["field-90_6"] = str(row_90["仕上日"]) if pd.notna(row["仕上日"]) else ""
+                    rec_dict["field-90_4"] = str(row_90["無線日"]) if pd.notna(row_90["無線日"]) else ""
+                    rec_dict["field-90_5"] = str(row_90["三方日"]) if pd.notna(row_90["三方日"]) else ""
+                    rec_dict["field-90_6"] = str(row_90["仕上日"]) if pd.notna(row_90["仕上日"]) else ""
                     rec_dict["field-90_7"] = bool(row_90["チェック"])
-                    rec_dict["field-90_9"] = str(row_90["備考"]) if pd.notna(row["備考"]) else ""
+                    rec_dict["field-90_9"] = str(row_90["備考"]) if pd.notna(row_90["備考"]) else ""
                     
                     item_90["record"] = rec_dict
                     sub90_list.append(item_90)
@@ -308,7 +302,7 @@ with tab1:
                     sub90_list.append({
                         "record": {
                             "field-90_1": str(row_90["配本日"]) if pd.notna(row_90["配本日"]) else "",
-                            "field-90_3": str(row_90["折本日"]) if pd.notna(row["折本日"]) else "",
+                            "field-90_3": str(row_90["折本日"]) if pd.notna(row_90["折本日"]) else "",
                             "field-90_4": str(row_90["無線日"]) if pd.notna(row["無線日"]) else "",
                             "field-90_5": str(row_90["三方日"]) if pd.notna(row["三方日"]) else "",
                             "field-90_6": str(row_90["仕上日"]) if pd.notna(row["仕上日"]) else "",
