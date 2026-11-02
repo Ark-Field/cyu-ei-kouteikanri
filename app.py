@@ -275,14 +275,14 @@ with tab1:
             sample_rec = {}
             field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
     else:
-        st.info("ℹ️ 検索条件を指定するか、@pocketから受注番号を指定してアクセスしてください。")
+        st.info("ℹ️ 検索条件を指定するか、DBから受注番号を指定してアクセスしてください。")
         sample_rec = {}
         field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
 
     st.divider()
     
     checked_rows_count = len(edited_flat_df[edited_flat_df["更新"] == True]) if 'edited_flat_df' in locals() else 0
-    if st.button(f"💾 チェックを入れた受注データ（{checked_rows_count}件）を @pocket に一括上書き保存する", type="primary", key="btn_save_checked"):
+    if st.button(f"💾 チェックを入れた受注データ（{checked_rows_count}件）を データベース に一括上書き保存する", type="primary", key="btn_save_checked"):
         checked_rows = edited_flat_df[edited_flat_df["更新"] == True]
         if checked_rows.empty:
             st.warning("⚠️ 上書き保存する行の「更新チェック」ボックスにチェックを入れてください。")
