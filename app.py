@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 # 1. ページ基本設定
 st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @ポケット連動 受注・工程・納品・請求管理システム")
+st.title("📊 @pocket連動 受注・工程・納品・請求管理システム")
 
 # 2. Secrets設定
 if "pocket" in st.secrets:
@@ -20,37 +20,26 @@ else:
 
 APP_ID = 34  # @ポケット対象アプリID
 
-# 3. APIデータ取得関数（検索条件指定＆期間フィルタリング対応）
+# 3. APIデータ取得関数（新着順ソート＆期間フィルタリング対応）
 def fetch_pocket_records(start_date=None, end_date=None):
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
     headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
     
-    # PleasanterのAPI仕様に合わせた検索条件（Condition）の構築
-    # 受注日（field-1）を対象に、指定期間内のデータをサーバー側で絞り込み要求します
-    payload = {}
-    if start_date and end_date:
-        start_str = start_date.strftime("%Y-%m-%d")
-        end_str = end_date.strftime("%Y-%m-%d")
-        payload = {
-            "View": {
-                "Condition": {
-                    "field-1": f"{start_str},{end_str}"
-                }
-            }
+    # 💡 新しい順（降順）に取得するためのリクエストボディ（Pleasanter API仕様）
+    # Id または 受注番号(field-2) の降順、あるいは View でソートを指定
+    payload = {
+        "View": {
+            "ColumnSorter": "Descending",
+            "ColumnName": "UpdatedTime"  # または "IssueId" や "Creator" など、新しいものが上に来る項目
         }
+    }
     
     try:
-        # POSTリクエストまたはGETリクエスト（Pleasanterは検索時にPOSTで条件を渡す仕様、またはGET）
-        # ※バックエンドの挙動に合わせて確実にデータを取得できるよう、まず条件付きPOSTを試行し、失敗した場合はGETで全件取得＋Python側絞り込みにフォールバックします
-        response = None
-        if payload:
-            try:
-                response = requests.post(url, headers=headers, json=payload, timeout=20)
-            except Exception:
-                pass
+        # POSTリクエストでソート条件を送信して取得を試みる
+        response = requests.post(url, headers=headers, json=payload, timeout=20)
         
-        if response is None or response.status_code != 200:
-            # フォールバックとしてGETリクエストを実行
+        if response.status_code != 200:
+            # 失敗した場合はGETでフォールバック
             response = requests.get(url, headers=headers, timeout=20)
         
         if response.status_code == 200:
@@ -69,7 +58,7 @@ def fetch_pocket_records(start_date=None, end_date=None):
                 rec_body["_accessEditUrl"] = item.get("accessEditUrl", "")
                 parsed_records.append(rec_body)
             
-            # Python側でも確実に期間フィルタリング（二重の安全策）
+            # Python側で期間フィルタリング
             if start_date and end_date and parsed_records:
                 filtered_records = []
                 start_str = start_date.strftime("%Y-%m-%d")
@@ -100,13 +89,13 @@ tab1, tab2, tab3 = st.tabs([
 # タブ1：受注日検索 ＆ 一覧エディタ編集
 # ==========================================
 with tab1:
-    st.header("📋 受注データ一覧（受注日 `field-1` 期間検索）")
+    st.header("📋 受注データ一覧（新着順取得 ＆ 受注日期間検索）")
     
-    # 初期値：2026年10月（テストデータに合わせて10月に設定、必要に応じて変更可能）
+    # 初期値：2026年10月
     default_start = datetime(2026, 10, 1).date()
     default_end = datetime(2026, 10, 31).date()
     
-    st.write("🔍 **受注日の期間を指定し、「検索実行」ボタンを押すと @pocket から該当データを取得します**")
+    st.write("🔍 **新着順でデータを取得し、指定した受注日期間で絞り込みます**")
     
     c1, c2, c3 = st.columns([2, 2, 1])
     with c1:
@@ -119,14 +108,14 @@ with tab1:
         search_clicked = st.button("🔄 検索実行", type="primary", key="btn_s1")
 
     if search_clicked:
-        with st.spinner("@ポケットからデータを取得・絞り込み中..."):
+        with st.spinner("@ポケットから新着データを取得・絞り込み中..."):
             st.session_state["api_records"] = fetch_pocket_records(t1_start, t1_end)
 
     api_records = st.session_state.get("api_records", None)
     
     if api_records is not None:
         if api_records:
-            st.success(f"✨ 受注日が条件に合致するレコード **{len(api_records)} 件** を取得しました。下の表で一覧確認・選択が可能です。")
+            st.success(f"✨ 条件に合致するレコード **{len(api_records)} 件** を取得しました！")
             
             summary_data = []
             for idx, r in enumerate(api_records):
