@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, date
 
 # 1. ページ基本設定
 st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @pocket連動 受注・工程・納品・請求管理システム")
+st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（明細同期・新規対応版）")
 
 # 2. Secrets設定
 if "pocket" in st.secrets:
@@ -124,8 +124,8 @@ with tab1:
             for record_idx, r in enumerate(api_records):
                 h_ord_no = str(r.get("field-2", ""))
                 h_ord_date = parse_date_safe(r.get("field-1"))
-                h_pub = str(r.get("field-8", ""))    # リンク参照（表示用）
-                h_title = str(r.get("field-13", "")) # リンク参照（表示用）
+                h_pub = str(r.get("field-8", ""))
+                h_title = str(r.get("field-13", ""))
                 h_qty = str(r.get("field-4", ""))
                 h_price = str(r.get("field-5", ""))
                 
@@ -190,8 +190,8 @@ with tab1:
                     "_id_89": None,
                     "受注番号": st.column_config.TextColumn("受注番号"),
                     "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD"),
-                    "出版社名": st.column_config.TextColumn("出版社名", disabled=True), # リンク参照データのため編集不可
-                    "書名": st.column_config.TextColumn("書名", disabled=True),          # リンク参照データのため編集不可
+                    "出版社名": st.column_config.TextColumn("出版社名", disabled=True),
+                    "書名": st.column_config.TextColumn("書名", disabled=True),
                     "製本数": st.column_config.TextColumn("製本数"),
                     "単価": st.column_config.TextColumn("単価"),
                     "配本日": st.column_config.DateColumn("配本日", format="YYYY-MM-DD"),
@@ -255,6 +255,7 @@ with tab1:
                 
                 update_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records/{record_id}"
                 
+                # 💡 明細1 (field-90: 配本等) - 既存IDがあれば含め、なければ新規として追加
                 sub90_item = {}
                 if row["_id_90"]:
                     sub90_item["Id"] = row["_id_90"]
@@ -268,6 +269,7 @@ with tab1:
                     "field-90_9": str(row["備考"])
                 })
                 
+                # 💡 明細2 (field-88: 納品)
                 sub88_item = {}
                 if row["_id_88"]:
                     sub88_item["Id"] = row["_id_88"]
@@ -276,6 +278,7 @@ with tab1:
                     "field-88_4": int(row["納品数"]) if str(row["納品数"]).isdigit() else 0
                 })
                 
+                # 💡 明細3 (field-89: 売上)
                 sub89_item = {}
                 if row["_id_89"]:
                     sub89_item["Id"] = row["_id_89"]
@@ -284,7 +287,6 @@ with tab1:
                     "field-89_3": int(row["請求数量"]) if str(row["請求数量"]).isdigit() else 0
                 })
 
-                # 💡 リンク参照項目 (field-8, field-13) は更新ペイロードから除外
                 payload = {
                     "apiVersion": 1.1,
                     "record": {
