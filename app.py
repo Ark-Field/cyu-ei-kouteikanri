@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, date
 
 # 1. ページ基本設定
 st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（明細同期・新規対応版）")
+st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（明細自動判定版）")
 
 # 2. Secrets設定
 if "pocket" in st.secrets:
@@ -255,7 +255,7 @@ with tab1:
                 
                 update_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records/{record_id}"
                 
-                # 💡 明細1 (field-90: 配本等) - 既存IDがあれば含め、なければ新規として追加
+                # 💡 既存IDがある場合は更新、ない場合は新規追加用の構造として組み立て
                 sub90_item = {}
                 if row["_id_90"]:
                     sub90_item["Id"] = row["_id_90"]
@@ -269,7 +269,6 @@ with tab1:
                     "field-90_9": str(row["備考"])
                 })
                 
-                # 💡 明細2 (field-88: 納品)
                 sub88_item = {}
                 if row["_id_88"]:
                     sub88_item["Id"] = row["_id_88"]
@@ -278,7 +277,6 @@ with tab1:
                     "field-88_4": int(row["納品数"]) if str(row["納品数"]).isdigit() else 0
                 })
                 
-                # 💡 明細3 (field-89: 売上)
                 sub89_item = {}
                 if row["_id_89"]:
                     sub89_item["Id"] = row["_id_89"]
@@ -287,6 +285,7 @@ with tab1:
                     "field-89_3": int(row["請求数量"]) if str(row["請求数量"]).isdigit() else 0
                 })
 
+                # 💡 Pleasanter APIでサブテーブルを安全に送るため、入力値がある場合のみ（または常にリスト形式で）設定
                 payload = {
                     "apiVersion": 1.1,
                     "record": {
