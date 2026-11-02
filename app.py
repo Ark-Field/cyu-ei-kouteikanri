@@ -27,12 +27,15 @@ APP_ID = 34  # @pocket対象アプリID
 # ==========================================
 # 3. APIデータ取得関数
 # ==========================================
-def fetch_pocket_records(start_date=None, end_date=None):
+def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None):
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
     headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
     
     params = {}
-    if start_date and end_date:
+    # 受注番号が直接指定されている場合はクエリで優先検索
+    if target_order_no:
+        params["query"] = f'field-2 = "{target_order_no}"'
+    elif start_date and end_date:
         start_str = start_date.strftime("%Y-%m-%d")
         end_str = end_date.strftime("%Y-%m-%d")
         params["query"] = f'field-1 >= "{start_str}" and field-1 <= "{end_str}"'
@@ -58,7 +61,13 @@ def fetch_pocket_records(start_date=None, end_date=None):
                 merged_body["_recordId"] = item.get("Id", item.get("recordId", item.get("ResultId", rec_body.get("Id", ""))))
                 parsed_records.append(merged_body)
             
-            if start_date and end_date and parsed_records:
+            # 受注番号指定のローカルフィルタリング確認
+            if target_order_no and parsed_records:
+                matched = [r for r in parsed_records if str(r.get("field-2", "")) == str(target_order_no)]
+                if matched:
+                    return matched
+            
+            if not target_order_no and start_date and end_date and parsed_records:
                 filtered_records = []
                 start_str = start_date.strftime("%Y-%m-%d")
                 end_str = end_date.strftime("%Y-%m-%d")
@@ -89,7 +98,23 @@ def parse_date_safe(val):
         return None
 
 # ==========================================
-# 4. タブ構成の定義
+# 4. URLパラメータのチェック（@pocketのJSから飛んできた場合）
+# ==========================================
+query_params = st.query_params
+url_order_no = query_params.get("ord", None)
+
+# 初回起動時やURLパラメータがある場合、セッションに自動ロード
+if "api_records" not in st.session_state or url_order_no:
+    if url_order_no:
+        with st.spinner(f"@ポケットから受注番号: {url_order_no} のデータを取得中..."):
+            st.session_state["api_records"] = fetch_pocket_records(target_order_no=url_order_no)
+    else:
+        default_end = date.today()
+        default_start = default_end - timedelta(days=21)
+        st.session_state["api_records"] = fetch_pocket_records(start_date=default_start, end_date=default_end)
+
+# ==========================================
+# 5. タブ構成の定義
 # ==========================================
 tab1, tab2, tab3 = st.tabs([
     "📋 タブ1: 進捗・日付更新エディタ", 
@@ -102,30 +127,45 @@ tab1, tab2, tab3 = st.tabs([
 # ==========================================
 with tab1:
     st.header("📋 受注進捗・日付更新管理エディタ")
-    st.info("💡 既存の受注データに対して進捗日付を入力・更新します。保存すると自動で最新データが読み込まれ、納品書・請求書にも即座に反映されます。")
     
-    default_start = datetime(2026, 10, 1).date()
-    default_end = datetime(2026, 10, 31).date()
+    if url_order_no:
+        st.success(f"🔗 @pocketから受注番号 **{url_order_no}** の指定を受けてダイレクト起動しました！")
     
-    c1, c2, c3 = st.columns([2, 2, 1])
-    with c1:
-        t1_start = st.date_input("受注日（開始）", value=default_start, key="t1_s")
-    with c2:
-        t1_end = st.date_input("受注日（終了）", value=default_end, key="t1_e")
-    with c3:
-        st.write("")
-        st.write("")
-        search_clicked = st.button("🔄 検索実行", type="primary", key="btn_s1")
+    # 検索コントロール（期間指定 ＆ 受注番号直接検索）
+    with st.expander("🔍 検索条件の変更・受注番号直接指定はこちら", expanded=bool(not url_order_no)):
+        col_s1, col_s2, col_s3 = st.columns([2, 2, 1])
+        with col_s1:
+            default_end = date.today()
+            default_start = default_end - timedelta(days=21)
+            t1_start = st.date_input("受注日（開始）", value=default_start, key="t1_s")
+        with col_s2:
+            t1_end = st.date_input("受注日（終了）", value=default_end, key="t1_e")
+        with col_s3:
+            st.write("")
+            st.write("")
+            search_clicked = st.button("🔄 期間で検索", type="primary", key="btn_s1")
+
+        st.markdown("---")
+        direct_order_input = st.text_input("🏷️ 受注番号で直接検索（1件指定）", value=url_order_no if url_order_no else "", key="direct_ord")
+        direct_search_clicked = st.button("🔍 受注番号で検索実行", key="btn_direct_s")
 
     if search_clicked:
+        st.query_params.clear()  # URLパラメータをクリア
         with st.spinner("@ポケットからデータを取得中..."):
-            st.session_state["api_records"] = fetch_pocket_records(t1_start, t1_end)
+            st.session_state["api_records"] = fetch_pocket_records(start_date=t1_start, end_date=t1_end)
+        st.rerun()
+
+    if direct_search_clicked and direct_order_input:
+        st.query_params["ord"] = direct_order_input  # URLにセット
+        with st.spinner(f"受注番号 {direct_order_input} を検索中..."):
+            st.session_state["api_records"] = fetch_pocket_records(target_order_no=direct_order_input)
+        st.rerun()
 
     api_records = st.session_state.get("api_records", None)
     
     if api_records is not None:
         if api_records:
-            st.success(f"✨ 親レコード **{len(api_records)} 件** を取得しました。")
+            st.success(f"✨ 対象レコード **{len(api_records)} 件** を取得しました。")
             
             flat_data = []
             for record_idx, r in enumerate(api_records):
@@ -231,11 +271,11 @@ with tab1:
             st.info(f"📌 現在選択中のレコード: **受注番号 {field_2} ({field_13})** （下のタブ2・3のPDF発行に連動しています）")
                 
         else:
-            st.warning("⚠️ 指定した受注日の範囲に該当するレコードがありませんでした。")
+            st.warning("⚠️ 該当するレコードが見つかりませんでした。")
             sample_rec = {}
             field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
     else:
-        st.info("ℹ️ 上の検索条件を指定し「検索実行」ボタンを押すとデータが読み込まれます。")
+        st.info("ℹ️ 検索条件を指定するか、@pocketから受注番号を指定してアクセスしてください。")
         sample_rec = {}
         field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
 
@@ -384,9 +424,13 @@ with tab1:
             
             if success_count > 0:
                 st.success(f"✅ **{success_count} 件** のレコードデータを @pocket に正常に一括上書き保存しました！")
-                # 💡 秘訣：保存成功した瞬間に自動で最新データを再取得してセッションを更新！
-                st.session_state["api_records"] = fetch_pocket_records(t1_start, t1_end)
-                st.rerun()  # 画面を自動リロードして最新状態を即時反映
+                if url_order_no:
+                    st.session_state["api_records"] = fetch_pocket_records(target_order_no=url_order_no)
+                else:
+                    default_end = date.today()
+                    default_start = default_end - timedelta(days=21)
+                    st.session_state["api_records"] = fetch_pocket_records(start_date=default_start, end_date=default_end)
+                st.rerun()
                 
             if fail_count > 0:
                 st.error(f"❌ {fail_count} 件の保存に失敗しました。")
@@ -580,7 +624,7 @@ with tab3:
                     <th>売上日 / 対象</th>
                     <th class="right">請求数量</th>
                     <th class="right">単価</th>
-                    <th class="right">金額！</th>
+                    <th class="right">金額</th>
                 </tr>
         """
         for _, row in edited_sales.iterrows():
@@ -605,7 +649,7 @@ with tab3:
             <h2 style="text-align: right; margin-top: 20px;">ご請求金額合計: ￥{total_amount:,.2f} (税込)</h2>
             
             <div class="box">
-                <strong>【お振込先口座】</strong><br>
+                <b>【お振込先口座】</b><br>
                 {bank_name} {bank_branch} ({bank_type}) {bank_account}<br>
                 口座名義: {bank_holder}
             </div>
@@ -618,5 +662,5 @@ with tab3:
         </html>
         """
         st.success("請求書が生成されました！画面上のプレビュー、または印刷ボタンからPDFとして保存できます。")
-        st.components.v1.html(inv_html, height=600, scrolling=True)
-        st.download_button("📥 請求書HTMLファイルをダウンロード", data=inv_html.encode("utf-8"), file_name=f"請求書_{field_2 if 'field_2' in locals() else 'i'}.html", mime="text/html")
+        st.components.v1.html(inv_html, height=600, scrolling=True, key="preview_invoice_html")
+        st.download_button("📥 請求書HTMLファイルをダウンロード", data=inv_html.encode("utf-8"), file_name=f"請求書_{field_2 if 'field_2' in locals() else 'i'}.html", mime="text/html", key="download_invoice_html")
