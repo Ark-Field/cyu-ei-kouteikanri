@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 # 1. ページ基本設定
 st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @pocket連動 受注・工程・納品・請求管理システム")
+st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（明細フラット展開版）")
 
 # 2. Secrets設定
 if "pocket" in st.secrets:
@@ -80,21 +80,21 @@ def fetch_pocket_records(start_date=None, end_date=None):
 
 # 4. タブ構成の定義
 tab1, tab2, tab3 = st.tabs([
-    "📋 タブ1: 受注データ一覧エディタ（日本語項目）", 
-    "📦 タブ2: 今週の納品書発行", 
+    "📋 タブ1: 受注・明細フラット一覧エディタ", 
+    "📦 タブ2: 納品書発行", 
     "📄 タブ3: 請求書発行（口座UI付き）"
 ])
 
 # ==========================================
-# タブ1：受注データ一覧エディタ（日本語化＆一括操作）
+# タブ1：受注・明細フラット一覧エディタ
 # ==========================================
 with tab1:
-    st.header("📋 受注データ一覧 ＆ 直接編集エディタ")
+    st.header("📋 受注・明細フラット一覧 ＆ 直接編集エディタ")
     
     default_start = datetime(2026, 10, 1).date()
     default_end = datetime(2026, 10, 31).date()
     
-    st.write("🔍 **期間を指定して「検索実行」を押すと、日本語項目で一覧表示され、表上で直接編集が可能です。**")
+    st.write("🔍 **期間を指定して「検索実行」を押すと、ヘッダーと明細行が横並び（フラット）になった一覧表が表示されます。**")
     
     c1, c2, c3 = st.columns([2, 2, 1])
     with c1:
@@ -114,46 +114,84 @@ with tab1:
     
     if api_records is not None:
         if api_records:
-            st.success(f"✨ 該当レコード **{len(api_records)} 件** を取得しました。表のセルを直接編集できます。")
+            st.success(f"✨ 親レコード **{len(api_records)} 件** を取得しました。明細を展開してフラット表示します。")
             
-            # フィールドIDをわかりやすい日本語列名にマッピング（インデックスをそのまま活用）
-            summary_data = []
-            for r in api_records:
-                summary_data.append({
-                    "選択": False,
-                    "受注番号": str(r.get("field-2", "")),
-                    "受注日": str(r.get("field-1", ""))[:10],
-                    "出版社名": str(r.get("field-8", "")),
-                    "書名": str(r.get("field-13", "")),
-                    "製本数": str(r.get("field-4", "")),
-                    "単価": str(r.get("field-5", ""))
-                })
+            # ヘッダー情報とサブテーブル（明細）を結合してフラットなリストを作成
+            flat_data = []
+            for record_idx, r in enumerate(api_records):
+                h_ord_no = str(r.get("field-2", ""))
+                h_ord_date = str(r.get("field-1", ""))[:10]
+                h_pub = str(r.get("field-8", ""))
+                h_title = str(r.get("field-13", ""))
+                h_qty = str(r.get("field-4", ""))
+                h_price = str(r.get("field-5", ""))
+                
+                # サブテーブル（例: field-88 納品明細 または field-90 工程など、存在するものを使用）
+                # ここでは代表例として field-88 や Results2 などを安全に取得
+                sub_items = r.get("Results2", r.get("field-88", []))
+                
+                if isinstance(sub_items, list) and len(sub_items) > 0:
+                    for sub_idx, sub in enumerate(sub_items):
+                        if isinstance(sub, dict):
+                            sub_rec = sub.get("record", sub)
+                        else:
+                            sub_rec = {}
+                        
+                        flat_data.append({
+                            "選択": False,
+                            "_record_idx": record_idx,
+                            "受注番号": h_ord_no,
+                            "受注日": h_ord_date,
+                            "出版社名": h_pub,
+                            "書名": h_title,
+                            "製本数": h_qty,
+                            "単価": h_price,
+                            "明細ID/項目": str(sub_rec.get("field-88_2", sub_rec.get("項目", f"明細-{sub_idx+1}"))),
+                            "明細数量": str(sub_rec.get("field-88_4", sub_rec.get("数量", h_qty)))
+                        })
+                else:
+                    # 明細がない場合はヘッダーのみ1行として展開
+                    flat_data.append({
+                        "選択": False,
+                        "_record_idx": record_idx,
+                        "受注番号": h_ord_no,
+                        "受注日": h_ord_date,
+                        "出版社名": h_pub,
+                        "書名": h_title,
+                        "製本数": h_qty,
+                        "単価": h_price,
+                        "明細ID/項目": "（明細なし）",
+                        "明細数量": h_qty
+                    })
             
-            df_summary = pd.DataFrame(summary_data)
+            df_flat = pd.DataFrame(flat_data)
             
-            # st.data_editor で一覧表を構築（エラーになる不要な column_config を排除）
-            edited_summary_df = st.data_editor(
-                df_summary,
+            # st.data_editor でフラット一覧を表示・編集可能に
+            edited_flat_df = st.data_editor(
+                df_flat,
                 num_rows="fixed",
-                key="grid_summary_main",
+                key="grid_flat_main",
                 use_container_width=True,
                 column_config={
                     "選択": st.column_config.CheckboxColumn("選択", required=True),
+                    "_record_idx": None,
                     "受注番号": st.column_config.TextColumn("受注番号"),
-                    "受注日": st.column_config.TextColumn("受注日 (YYYY-MM-DD)"),
+                    "受注日": st.column_config.TextColumn("受注日"),
                     "出版社名": st.column_config.TextColumn("出版社名"),
                     "書名": st.column_config.TextColumn("書名"),
                     "製本数": st.column_config.TextColumn("製本数"),
                     "単価": st.column_config.TextColumn("単価"),
+                    "明細ID/項目": st.column_config.TextColumn("明細項目"),
+                    "明細数量": st.column_config.TextColumn("明細数量"),
                 }
             )
             
-            # 選択された行のインデックスを取得
-            selected_rows = edited_summary_df[edited_summary_df["選択"] == True]
+            # 選択された行の取得
+            selected_rows = edited_flat_df[edited_flat_df["選択"] == True]
             
             if not selected_rows.empty:
-                target_idx = int(selected_rows.index[0])
-                sample_rec = api_records[target_idx]
+                target_record_idx = int(selected_rows.iloc[0]["_record_idx"])
+                sample_rec = api_records[target_record_idx]
                 field_2 = str(selected_rows.iloc[0]["受注番号"])
                 field_1 = str(selected_rows.iloc[0]["受注日"])
                 field_8 = str(selected_rows.iloc[0]["出版社名"])
@@ -164,12 +202,12 @@ with tab1:
                 st.info(f"📌 現在選択中のレコード: **受注番号 {field_2} ({field_13})** （下のタブ2・3のPDF発行に連動しています）")
             else:
                 sample_rec = api_records[0]
-                field_2 = str(edited_summary_df.iloc[0]["受注番号"])
-                field_1 = str(edited_summary_df.iloc[0]["受注日"])
-                field_8 = str(edited_summary_df.iloc[0]["出版社名"])
-                field_13 = str(edited_summary_df.iloc[0]["書名"])
-                field_4 = str(edited_summary_df.iloc[0]["製本数"])
-                field_5 = str(edited_summary_df.iloc[0]["単価"])
+                field_2 = str(edited_flat_df.iloc[0]["受注番号"])
+                field_1 = str(edited_flat_df.iloc[0]["受注日"])
+                field_8 = str(edited_flat_df.iloc[0]["出版社名"])
+                field_13 = str(edited_flat_df.iloc[0]["書名"])
+                field_4 = str(edited_flat_df.iloc[0]["製本数"])
+                field_5 = str(edited_flat_df.iloc[0]["単価"])
                 st.caption("ℹ️ 表の「選択」チェックボックスにチェックを入れると、PDF発行対象のレコードを切り替えられます。（現在は先頭行を選択中）")
                 
         else:
