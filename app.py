@@ -25,20 +25,32 @@ else:
 APP_ID = 34  # @pocket対象アプリID
 
 # ==========================================
-# 3. APIデータ取得関数
+# 3. APIデータ取得関数（期間 ＋ 出版社名の併用対応）
 # ==========================================
-def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None):
+def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, target_publisher=None):
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
     headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
     
     params = {}
-    # 受注番号が直接指定されている場合はクエリで優先検索
+    
+    # 1. 受注番号指定の優先検索
     if target_order_no:
         params["query"] = f'field-2 = "{target_order_no}"'
-    elif start_date and end_date:
-        start_str = start_date.strftime("%Y-%m-%d")
-        end_str = end_date.strftime("%Y-%m-%d")
-        params["query"] = f'field-1 >= "{start_str}" and field-1 <= "{end_str}"'
+    else:
+        query_parts = []
+        # 2. 期間条件の追加
+        if start_date and end_date:
+            start_str = start_date.strftime("%Y-%m-%d")
+            end_str = end_date.strftime("%Y-%m-%d")
+            query_parts.append(f'field-1 >= "{start_str}" and field-1 <= "{end_str}"')
+        
+        # 3. 出版社名条件の追加（部分一致）
+        if target_publisher:
+            query_parts.append(f'field-8 like "{target_publisher}"')
+        
+        # 条件を `and` で結合
+        if query_parts:
+            params["query"] = " and ".join(query_parts)
     
     try:
         response = requests.get(url, headers=headers, params=params, timeout=20)
@@ -61,27 +73,36 @@ def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None):
                 merged_body["_recordId"] = item.get("Id", item.get("recordId", item.get("ResultId", rec_body.get("Id", ""))))
                 parsed_records.append(merged_body)
             
-            # 受注番号指定のローカルフィルタリング確認
+            # ローカルでの念のためフィルタリング確認
             if target_order_no and parsed_records:
                 matched = [r for r in parsed_records if str(r.get("field-2", "")) == str(target_order_no)]
                 if matched:
                     return matched
             
-            if not target_order_no and start_date and end_date and parsed_records:
-                filtered_records = []
-                start_str = start_date.strftime("%Y-%m-%d")
-                end_str = end_date.strftime("%Y-%m-%d")
-                
-                for r in parsed_records:
+            # 期間＆出版社名でのローカル二重フィルタリング（安全確保）
+            filtered_records = []
+            start_str = start_date.strftime("%Y-%m-%d") if start_date else None
+            end_str = end_date.strftime("%Y-%m-%d") if end_date else None
+            
+            for r in parsed_records:
+                # 日付チェック
+                if start_str and end_str:
                     raw_date_str = str(r.get("field-1", ""))
                     if not raw_date_str or raw_date_str.lower() in ["nan", "none"]:
                         continue
                     r_date = raw_date_str.replace("/", "-")[:10]
-                    if len(r_date) == 10 and (start_str <= r_date <= end_str):
-                        filtered_records.append(r)
-                return filtered_records
-            
-            return parsed_records
+                    if len(r_date) != 10 or not (start_str <= r_date <= end_str):
+                        continue
+                
+                # 出版社名チェック
+                if target_publisher:
+                    r_pub = str(r.get("field-8", ""))
+                    if target_publisher.lower() not in r_pub.lower():
+                        continue
+                
+                filtered_records.append(r)
+                
+            return filtered_records if (start_date or target_publisher) else parsed_records
         else:
             st.error(f"❌ APIエラー (ステータスコード {response.status_code}): {response.text}")
     except Exception as e:
@@ -98,7 +119,7 @@ def parse_date_safe(val):
         return None
 
 # ==========================================
-# 4. URLパラメータのチェック（@pocketのJSから飛んできた場合）
+# 4. URLパラメータのチェック
 # ==========================================
 query_params = st.query_params
 url_order_no = query_params.get("ord", None)
@@ -123,40 +144,46 @@ tab1, tab2, tab3 = st.tabs([
 ])
 
 # ==========================================
-# タブ1：進捗・日付更新エディタ
+# タブ1：受注一覧表 ＆ 日付更新エディタ
 # ==========================================
 with tab1:
     st.header("📋 受注一覧表")
     
     if url_order_no:
-        st.success(f"🔗 DBから受注番号 **{url_order_no}** の起動しました！")
+        st.success(f"🔗 DBから受注番号 **{url_order_no}** のデータを起動しました！")
     
-    # 検索コントロール（期間指定 ＆ 受注番号直接検索）
-    with st.expander("🔍 検索条件の変更・受注番号直接指定はこちら", expanded=bool(not url_order_no)):
-        col_s1, col_s2, col_s3 = st.columns([2, 2, 1])
+    # 検索コントロール（期間指定 ＋ 出版社名併用 ＆ 受注番号指定）
+    with st.expander("🔍 検索条件の変更・絞り込み（期間 ＆ 出版社名 ＆ 受注番号）はこちら", expanded=bool(not url_order_no)):
+        col_s1, col_s2 = st.columns(2)
         with col_s1:
             default_end = date.today()
             default_start = default_end - timedelta(days=21)
             t1_start = st.date_input("受注日（開始）", value=default_start, key="t1_s")
         with col_s2:
             t1_end = st.date_input("受注日（終了）", value=default_end, key="t1_e")
-        with col_s3:
-            st.write("")
-            st.write("")
-            search_clicked = st.button("🔄 期間で検索", type="primary", key="btn_s1")
-
+        
+        publisher_input = st.text_input("📖 出版社名で絞り込み（空欄なら期間内すべて）", value="", key="pub_ord")
+        
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            search_clicked = st.button("🔄 期間 ＆ 出版社名で検索", type="primary", key="btn_s1")
+        
         st.markdown("---")
         direct_order_input = st.text_input("🏷️ 受注番号で直接検索（1件指定）", value=url_order_no if url_order_no else "", key="direct_ord")
         direct_search_clicked = st.button("🔍 受注番号で検索実行", key="btn_direct_s")
 
     if search_clicked:
-        st.query_params.clear()  # URLパラメータをクリア
+        st.query_params.clear()
         with st.spinner("@ポケットからデータを取得中..."):
-            st.session_state["api_records"] = fetch_pocket_records(start_date=t1_start, end_date=t1_end)
+            st.session_state["api_records"] = fetch_pocket_records(
+                start_date=t1_start, 
+                end_date=t1_end, 
+                target_publisher=publisher_input if publisher_input else None
+            )
         st.rerun()
 
     if direct_search_clicked and direct_order_input:
-        st.query_params["ord"] = direct_order_input  # URLにセット
+        st.query_params["ord"] = direct_order_input
         with st.spinner(f"受注番号 {direct_order_input} を検索中..."):
             st.session_state["api_records"] = fetch_pocket_records(target_order_no=direct_order_input)
         st.rerun()
@@ -285,7 +312,7 @@ with tab1:
     if st.button(f"💾 チェックを入れた受注データ（{checked_rows_count}件）を データベース に一括上書き保存する", type="primary", key="btn_save_checked"):
         checked_rows = edited_flat_df[edited_flat_df["更新"] == True]
         if checked_rows.empty:
-            st.warning("⚠️ 上書き保存する行の「更新チェック」ボックスにチェックを入れてください。")
+            st.warning("⚠️ 上書き保存する行のガチャ「更新チェック」ボックスにチェックを入れてください。")
         else:
             headers = {
                 "X-At-Pocket-API-Key": POCKET_API_KEY, 
@@ -423,7 +450,7 @@ with tab1:
                     fail_count += 1
             
             if success_count > 0:
-                st.success(f"✅ **{success_count} 件** のレコードデータを @pocket に正常に一括上書き保存しました！")
+                st.success(f"✅ **{success_count} 件** のレコードデータを データベース に正常に一括上書き保存しました！")
                 if url_order_no:
                     st.session_state["api_records"] = fetch_pocket_records(target_order_no=url_order_no)
                 else:
@@ -575,7 +602,7 @@ with tab3:
     
     if st.button("🚀 請求書プレビュー / 印刷（PDF）を作成", type="primary", key="btn_pdf_invoice"):
         try:
-            unit_price = float(field_5) if 'field_5' in locals() and field_5 and str(field_5).replace('.','',1).isdigit() else 0
+            unit_price = float(field_5) if 'field_5' in locals() else 0
         except ValueError:
             unit_price = 0
             
@@ -628,7 +655,7 @@ with tab3:
                 </tr>
         """
         for _, row in edited_sales.iterrows():
-            s_date = str(row["売上日"]) if pd.notna(row["売上日"]) else ""
+            s_date = str(row["売上日"]) if pd.notna(row["売X上日"]) else ""
             s_qty = row["請求数量"]
             try:
                 q_num = int(s_qty) if str(s_qty).isdigit() else 0
