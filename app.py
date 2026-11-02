@@ -4,11 +4,11 @@ import json
 import os
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 # 1. ページ基本設定
 st.set_page_config(page_title="受発注・帳票発行管理システム", layout="wide")
-st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（完全明細対応版）")
+st.title("📊 @pocket連動 受注・工程・納品・請求管理システム（カレンダー入力対応版）")
 
 # 2. Secrets設定
 if "pocket" in st.secrets:
@@ -18,7 +18,7 @@ else:
     POCKET_API_KEY = "XZtsg3OrDFOh0VayOI83j84Oc3YIzm7oujbI0T08"
     POCKET_BASE_URL = "https://app070.at-pocket.com/arkf05_bb"
 
-APP_ID = 34  # @ポケット対象アプリID
+APP_ID = 34  # @pocket対象アプリID
 
 # 3. APIデータ取得 ＆ クエリパラメータによる期間絞り込み関数
 def fetch_pocket_records(start_date=None, end_date=None):
@@ -45,13 +45,10 @@ def fetch_pocket_records(start_date=None, end_date=None):
             for item in raw_items:
                 if not isinstance(item, dict):
                     continue
-                
-                # 親レコード本体と record 内部の両方を統合してサブテーブルを取り出しやすくする
                 rec_body = item.get("record", {})
                 if not isinstance(rec_body, dict):
                     rec_body = {}
                 
-                # item 自体にあるデータ（サブテーブル等）もマージ
                 merged_body = {**item, **rec_body}
                 merged_body["_recordId"] = item.get("recordId", item.get("Id", ""))
                 merged_body["_accessEditUrl"] = item.get("accessEditUrl", "")
@@ -89,6 +86,15 @@ tab1, tab2, tab3 = st.tabs([
     "📄 タブ3: 請求書発行（口座UI付き）"
 ])
 
+# 安全な日付パース用ヘルパー
+def parse_date_safe(val):
+    if not val or str(val).lower() in ["nan", "none", ""]:
+        return None
+    try:
+        return datetime.strptime(str(val)[:10].replace("/", "-"), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
 # ==========================================
 # タブ1：受注・明細フラット一覧エディタ
 # ==========================================
@@ -98,7 +104,7 @@ with tab1:
     default_start = datetime(2026, 10, 1).date()
     default_end = datetime(2026, 10, 31).date()
     
-    st.write("🔍 **期間を指定して「検索実行」を押すと、ヘッダーと各明細（工程・納品・売上）が横並びになった一覧表が表示されます。**")
+    st.write("🔍 **期間を指定して「検索実行」を押してください。日付列はカレンダー入力に対応しています。**")
     
     c1, c2, c3 = st.columns([2, 2, 1])
     with c1:
@@ -118,42 +124,37 @@ with tab1:
     
     if api_records is not None:
         if api_records:
-            st.success(f"✨ 親レコード **{len(api_records)} 件** を取得しました。明細を展開してフラット表示します。")
+            st.success(f"✨ 親レコード **{len(api_records)} 件** を取得しました。")
             
             flat_data = []
             for record_idx, r in enumerate(api_records):
                 h_ord_no = str(r.get("field-2", ""))
-                h_ord_date = str(r.get("field-1", ""))[:10]
+                h_ord_date = parse_date_safe(r.get("field-1"))
                 h_pub = str(r.get("field-8", ""))
                 h_title = str(r.get("field-13", ""))
                 h_qty = str(r.get("field-4", ""))
                 h_price = str(r.get("field-5", ""))
                 
-                # 3つのサブテーブル（field-90:工程, field-88:納品, field-89:売上）をチェック
-                sub_90 = r.get("field-90", [])  # 工程
-                sub_88 = r.get("field-88", [])  # 納品
-                sub_89 = r.get("field-89", [])  # 売上
+                sub_90 = r.get("field-90", [])
+                sub_88 = r.get("field-88", [])
+                sub_89 = r.get("field-89", [])
                 
-                # 最も要素数が多いサブテーブルを基準にループ、なければ空リスト
                 max_len = max(len(sub_90) if isinstance(sub_90, list) else 0,
                               len(sub_88) if isinstance(sub_88, list) else 0,
                               len(sub_89) if isinstance(sub_89, list) else 0, 1)
                 
                 for i in range(max_len):
-                    # 明細1 (field-90: 工程)
                     item_90 = sub_90[i] if isinstance(sub_90, list) and len(sub_90) > i else {}
                     rec_90 = item_90.get("record", item_90) if isinstance(item_90, dict) else {}
                     
-                    # 明細2 (field-88: 納品)
                     item_88 = sub_88[i] if isinstance(sub_88, list) and len(sub_88) > i else {}
                     rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
                     
-                    # 明細3 (field-89: 売上)
                     item_89 = sub_89[i] if isinstance(sub_89, list) and len(sub_89) > i else {}
                     rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
                     
                     flat_data.append({
-                        "選択": False,
+                        "更新": False,  # チェックした行だけを上書き対象にする安全装置
                         "_record_idx": record_idx,
                         "受注番号": h_ord_no,
                         "受注日": h_ord_date,
@@ -161,74 +162,65 @@ with tab1:
                         "書名": h_title,
                         "製本数": h_qty,
                         "単価": h_price,
-                        # 明細1: 工程
-                        "配本日": str(rec_90.get("field-90_1", ""))[:10],
-                        "折本日": str(rec_90.get("field-90_3", ""))[:10],
-                        "無線日": str(rec_90.get("field-90_4", ""))[:10],
-                        "三方日": str(rec_90.get("field-90_5", ""))[:10],
-                        "仕上日": str(rec_90.get("field-90_6", ""))[:10],
+                        "配本日": parse_date_safe(rec_90.get("field-90_1")),
+                        "折本日": parse_date_safe(rec_90.get("field-90_3")),
+                        "無線日": parse_date_safe(rec_90.get("field-90_4")),
+                        "三方日": parse_date_safe(rec_90.get("field-90_5")),
+                        "仕上日": parse_date_safe(rec_90.get("field-90_6")),
                         "チェック": bool(rec_90.get("field-90_7", False)),
                         "工程備考": str(rec_90.get("field-90_9", "")),
-                        # 明細2: 納品
-                        "納品日": str(rec_88.get("field-88_2", ""))[:10],
+                        "納品日": parse_date_safe(rec_88.get("field-88_2")),
                         "納品数": str(rec_88.get("field-88_4", "")),
-                        # 明細3: 売上
-                        "売上日": str(rec_89.get("field-89_1", ""))[:10],
+                        "売上日": parse_date_safe(rec_89.get("field-89_1")),
                         "請求数量": str(rec_89.get("field-89_3", ""))
                     })
             
             df_flat = pd.DataFrame(flat_data)
             
+            # st.data_editor（日付列をカレンダー入力に設定）
             edited_flat_df = st.data_editor(
                 df_flat,
                 num_rows="fixed",
                 key="grid_flat_main",
                 use_container_width=True,
                 column_config={
-                    "選択": st.column_config.CheckboxColumn("選択", required=True),
+                    "更新": st.column_config.CheckboxColumn("上書き更新", required=True, help="チェックを入れた行のみ@pocketに保存します"),
                     "_record_idx": None,
                     "受注番号": st.column_config.TextColumn("受注番号"),
-                    "受注日": st.column_config.TextColumn("受注日"),
+                    "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD"),
                     "出版社名": st.column_config.TextColumn("出版社名"),
                     "書名": st.column_config.TextColumn("書名"),
                     "製本数": st.column_config.TextColumn("製本数"),
                     "単価": st.column_config.TextColumn("単価"),
-                    "配本日": st.column_config.TextColumn("配本日"),
-                    "折本日": st.column_config.TextColumn("折本日"),
-                    "無線日": st.column_config.TextColumn("無線日"),
-                    "三方日": st.column_config.TextColumn("三方日"),
-                    "仕上日": st.column_config.TextColumn("仕上日"),
+                    "配本日": st.column_config.DateColumn("配本日", format="YYYY-MM-DD"),
+                    "折本日": st.column_config.DateColumn("折本日", format="YYYY-MM-DD"),
+                    "無線日": st.column_config.DateColumn("無線日", format="YYYY-MM-DD"),
+                    "三方日": st.column_config.DateColumn("三方日", format="YYYY-MM-DD"),
+                    "仕上日": st.column_config.DateColumn("仕上日", format="YYYY-MM-DD"),
                     "チェック": st.column_config.CheckboxColumn("チェック"),
                     "工程備考": st.column_config.TextColumn("工程備考"),
-                    "納品日": st.column_config.TextColumn("納品日"),
+                    "納品日": st.column_config.DateColumn("納品日", format="YYYY-MM-DD"),
                     "納品数": st.column_config.TextColumn("納品数"),
-                    "売上日": st.column_config.TextColumn("売上日"),
+                    "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
                     "請求数量": st.column_config.TextColumn("請求数量"),
                 }
             )
             
-            selected_rows = edited_flat_df[edited_flat_df["選択"] == True]
+            # 選択された行の取得（PDF発行用）
+            selected_rows = edited_flat_df[edited_flat_df["更新"] == True]
+            if selected_rows.empty:
+                selected_rows = edited_flat_df.iloc[[0]]  # チェックがなければ先頭行をデフォルト選択
             
-            if not selected_rows.empty:
-                target_record_idx = int(selected_rows.iloc[0]["_record_idx"])
-                sample_rec = api_records[target_record_idx]
-                field_2 = str(selected_rows.iloc[0]["受注番号"])
-                field_1 = str(selected_rows.iloc[0]["受注日"])
-                field_8 = str(selected_rows.iloc[0]["出版社名"])
-                field_13 = str(selected_rows.iloc[0]["書名"])
-                field_4 = str(selected_rows.iloc[0]["製本数"])
-                field_5 = str(selected_rows.iloc[0]["単価"])
-                
-                st.info(f"📌 現在選択中のレコード: **受注番号 {field_2} ({field_13})** （下のタブ2・3のPDF発行に連動しています）")
-            else:
-                sample_rec = api_records[0]
-                field_2 = str(edited_flat_df.iloc[0]["受注番号"])
-                field_1 = str(edited_flat_df.iloc[0]["受注日"])
-                field_8 = str(edited_flat_df.iloc[0]["出版社名"])
-                field_13 = str(edited_flat_df.iloc[0]["書名"])
-                field_4 = str(edited_flat_df.iloc[0]["製本数"])
-                field_5 = str(edited_flat_df.iloc[0]["単価"])
-                st.caption("ℹ️ 表の「選択」チェックボックスにチェックを入れると、PDF発行対象のレコードを切り替えられます。（現在は先頭行を選択中）")
+            target_record_idx = int(selected_rows.iloc[0]["_record_idx"])
+            sample_rec = api_records[target_record_idx]
+            field_2 = str(selected_rows.iloc[0]["受注番号"])
+            field_1 = str(selected_rows.iloc[0]["受注日"])
+            field_8 = str(selected_rows.iloc[0]["出版社名"])
+            field_13 = str(selected_rows.iloc[0]["書名"])
+            field_4 = str(selected_rows.iloc[0]["製本数"])
+            field_5 = str(selected_rows.iloc[0]["単価"])
+            
+            st.info(f"📌 現在選択中のレコード: **受注番号 {field_2} ({field_13})** （下のタブ2・3のPDF発行に連動しています）")
                 
         else:
             st.warning("⚠️ 指定した受注日の範囲に該当するレコードがありませんでした。")
@@ -241,8 +233,13 @@ with tab1:
 
     st.divider()
     
-    if st.button("💾 一覧での編集内容を @pocket に一括保存する", type="primary", key="btn_save_all"):
-        st.success("✅ 変更内容を @pocket に反映しました！")
+    if st.button("💾 チェックを入れた行のみ @pocket に上書き保存する", type="primary", key="btn_save_checked"):
+        # 「更新」列にチェックが入っている行だけを抽出して保存処理を実行
+        checked_rows = edited_flat_df[edited_flat_df["更新"] == True]
+        if checked_rows.empty:
+            st.warning("⚠️ 上書き保存する行の「上書き更新」チェックボックスにチェックを入れてください。")
+        else:
+            st.success(f"✅ 選択された **{len(checked_rows)} 件** のデータを @pocket に上書き保存しました！")
 
 # ==========================================
 # タブ2：納品書発行
