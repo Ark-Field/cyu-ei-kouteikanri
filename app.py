@@ -498,11 +498,11 @@ if st.button("💾 チェックを入れたデータを データベース に�
             st.error(f"❌ {fail_count} 件の保存に失敗しました。")
 
 # ==========================================
-# タブ2：納品書発行（売上/仕入明細 field-89 ベース）
+# タブ2：納品書発行（売上/仕入明細 field-89 ベース ＆ 納品チェック絞り込み）
 # ==========================================
 with tab2:
     st.header("📦 納品書発行（売上/仕入明細連動）")
-    st.info("💡 選択中の受注データにおける『売上/仕入明細（field-89）』の納品日・納請区分を確認・編集して、納品書を作成できます。")
+    st.info("💡 納請区分が**「納品」にチェックされている行のみ**が、自動的に納品書プレビューおよび印刷対象に絞り込まれます。")
     
     raw_sales_list = sample_rec.get("field-89", []) if 'sample_rec' in locals() else []
     deliv_table_data = []
@@ -534,72 +534,74 @@ with tab2:
     )
     
     if st.button("🚀 納品書プレビュー / 印刷（PDF）を作成", type="primary", key="btn_pdf_deliv_sales"):
-        html_content = f"""
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <style>
-                body {{ font-family: 'Helvetica Neue', Arial, sans-serif; padding: 30px; color: #333; }}
-                h1 {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; }}
-                .meta {{ display: flex; justify-content: space-between; margin-bottom: 20px; }}
-                table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
-                th, td {{ border: 1px solid #ddd; padding: 10px; text-align: left; }}
-                th {{ background-color: #f2f2f2; }}
-                .right {{ text-align: right; }}
-                @media print {{
-                    body {{ padding: 0; }}
-                    .no-print {{ display: none; }}
-                }}
-            </style>
-        </head>
-        <body>
-            <h1>納 品 書</h1>
-            <div class="meta">
-                <div>
-                    <p><strong>宛先 (顧客名):</strong> {field_8 if 'field_8' in locals() else ''} 御中</p>
-                    <p><strong>受注番号:</strong> {field_2 if 'field_2' in locals() else ''} / <strong>受注日:</strong> {field_1 if 'field_1' in locals() else ''}</p>
-                    <p><strong>書名 (件名):</strong> {field_13 if 'field_13' in locals() else ''}</p>
+        # 💡 納請区分が「納品（True）」にチェックされている行のみに絞り込む
+        delivery_rows = [row for _, row in edited_deliv.iterrows() if row["納請区分"] == True]
+        
+        if not delivery_rows:
+            st.warning("⚠️ 納請区分が「納品」にチェックされている行がありません。納品書を作成するには、対象行の「納請区分」にチェックを入れてください。")
+        else:
+            html_content = f"""
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <style>
+                    body {{ font-family: 'Helvetica Neue', Arial, sans-serif; padding: 30px; color: #333; }}
+                    h1 {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; }}
+                    .meta {{ display: flex; justify-content: space-between; margin-bottom: 20px; }}
+                    table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+                    th, td {{ border: 1px solid #ddd; padding: 10px; text-align: left; }}
+                    th {{ background-color: #f2f2f2; }}
+                    .right {{ text-align: right; }}
+                    @media print {{
+                        body {{ padding: 0; }}
+                        .no-print {{ display: none; }}
+                    }}
+                </style>
+            </head>
+            <body>
+                <h1>納 品 書</h1>
+                <div class="meta">
+                    <div>
+                        <p><strong>宛先 (顧客名):</strong> {field_8 if 'field_8' in locals() else ''} 御中</p>
+                        <p><strong>受注番号:</strong> {field_2 if 'field_2' in locals() else ''} / <strong>受注日:</strong> {field_1 if 'field_1' in locals() else ''}</p>
+                        <p><strong>書名 (件名):</strong> {field_13 if 'field_13' in locals() else ''}</p>
+                    </div>
+                    <div>
+                        <p><strong>発行日:</strong> {datetime.now().strftime('%Y-%m-%d')}</p>
+                    </div>
                 </div>
-                <div>
-                    <p><strong>発行日:</strong> {datetime.now().strftime('%Y-%m-%d')}</p>
-                </div>
-            </div>
-            <p>下記のとおり納品いたしました。</p>
-            <table>
-                <tr>
-                    <th>納品日</th>
-                    <th>品名 (書名)</th>
-                    <th>区分</th>
-                    <th class="right">納品数</th>
-                </tr>
-        """
-        for _, row in edited_deliv.iterrows():
-            # 納請区分がチェックされている（納品）行のみ、またはすべてを対象にする場合はここでフィルタリング可能
-            d_date = str(row["納品日"]) if pd.notna(row["納品日"]) else ""
-            d_name = f"{field_13}" if 'field_13' in locals() else "本書"
-            d_kubun = "納品" if row["納請区分"] else "請求"
-            d_qty = row["請求数量"]
-            
-            html_content += f"""
-                <tr>
-                    <td>{d_date}</td>
-                    <td>{d_name}</td>
-                    <td>{d_kubun}</td>
-                    <td class="right">{d_qty} 部</td>
-                </tr>
+                <p>下記のとおり納品いたしました。</p>
+                <table>
+                    <tr>
+                        <th>納品日</th>
+                        <th>品名 (書名)</th>
+                        <th class="right">納品数</th>
+                    </tr>
             """
-        html_content += f"""
-            </table>
-            <br><br>
-            <div class="no-print" style="text-align: center; margin-top: 30px;">
-                <button onclick="window.print();" style="padding: 10px 20px; font-size: 16px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ この納品書を印刷 / PDF保存する</button>
-            </div>
-        </body>
-        </html>
-        """
-        st.success("納品書が生成されました！下のボタン、またはプレビュー内の印刷ボタンをご利用ください。")
-        st.components.v1.html(html_content, height=500, scrolling=True)
-        st.download_button("📥 納品書HTMLファイルをダウンロード", data=html_content.encode("utf-8"), file_name=f"納品書_{field_2 if 'field_2' in locals() else 'd'}.html", mime="text/html")
+            for row in delivery_rows:
+                d_date = str(row["納品日"]) if pd.notna(row["納品日"]) else ""
+                d_name = f"{field_13}" if 'field_13' in locals() else "本書"
+                d_qty = row["請求数量"]
+                
+                html_content += f"""
+                    <tr>
+                        <td>{d_date}</td>
+                        <td>{d_name}</td>
+                        <td class="right">{d_qty} 部</td>
+                    </tr>
+                """
+            html_content += f"""
+                </table>
+                <br><br>
+                <div class="no-print" style="text-align: center; margin-top: 30px;">
+                    <button onclick="window.print();" style="padding: 10px 20px; font-size: 16px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ この納品書を印刷 / PDF保存する</button>
+                </div>
+            </body>
+            </html>
+            """
+            st.success(f"納品書が生成されました！（対象件数: {len(delivery_rows)}件）")
+            st.components.v1.html(html_content, height=500, scrolling=True)
+            st.download_button("📥 納品書HTMLファイルをダウンロード", data=html_content.encode("utf-8"), file_name=f"納品書_{field_2 if 'field_2' in locals() else 'd'}.html", mime="text/html")
 
 # ==========================================
 # タブ3：請求書発行（口座UI付き）
