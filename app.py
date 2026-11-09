@@ -17,18 +17,83 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 
 # ==========================================
-# 1. ページ基本設定（Streamlitヘッダー非表示）
+# 1. ページ基本設定 ＆ 濃紺シックデザインCSS
 # ==========================================
-st.set_page_config(page_title="受注一覧表", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="受注一覧表・管理システム", layout="wide", initial_sidebar_state="collapsed")
 
-hide_streamlit_style = """
+dark_navy_theme_css = """
     <style>
+    /* 全体背景 */
+    .stApp {
+        background-color: #F8FAFC;
+    }
+    
+    /* ヘッダー・タイトルのカスタマイズ */
+    h1, h2, h3 {
+        color: #0F172A !important;
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+    }
+    
+    /* 標準ボタン（濃紺系） */
+    div.stButton > button:first-child {
+        background-color: #1E3A8A;
+        color: white;
+        border-radius: 6px;
+        border: none;
+        font-weight: bold;
+        padding: 0.5rem 1rem;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        transition: background-color 0.2s;
+    }
+    div.stButton > button:first-child:hover {
+        background-color: #1E40AF;
+        color: white;
+    }
+
+    /* ダウンロードボタン（ダークスレート系） */
+    div.stDownloadButton > button:first-child {
+        background-color: #0F172A;
+        color: white;
+        border-radius: 6px;
+        border: none;
+        font-weight: bold;
+    }
+    div.stDownloadButton > button:first-child:hover {
+        background-color: #1E293B;
+        color: white;
+    }
+
+    /* タブのスタイリング */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 6px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #E2E8F0;
+        border-radius: 6px 6px 0px 0px;
+        color: #334155;
+        font-weight: bold;
+        padding: 10px 18px;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #1E3A8A !important;
+        color: white !important;
+    }
+
+    /* エパンダー（検索条件など）のヘッダー */
+    .streamlit-expanderHeader {
+        background-color: #F1F5F9;
+        border-radius: 6px;
+        color: #1E293B;
+        font-weight: bold;
+    }
+
+    /* Streamlit標準の不要要素を完全非表示 */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     </style>
 """
-st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+st.markdown(dark_navy_theme_css, unsafe_allow_html=True)
 
 st.title("📊 受注一覧表 ＆ 付物・納品・請求管理システム")
 
@@ -532,7 +597,6 @@ with tab1:
         if api_records:
             st.success(f"✨ 対象レコード **{len(api_records)} 件** を取得しました。")
             
-            # DataFrameのセッション管理と初期化
             if "df_flat_session" not in st.session_state or st.session_state.get("last_len") != len(api_records):
                 flat_data = []
                 for record_idx, r in enumerate(api_records):
@@ -656,7 +720,6 @@ with tab1:
                 }
             )
             
-            # ユーザーがエディタ上で手動変更した内容をセッションに同期
             st.session_state["df_flat_session"] = edited_flat_df
 
             st.markdown("---")
