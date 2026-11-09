@@ -227,10 +227,10 @@ with tab1:
                         "仕上日": parse_date_safe(rec_90.get("field-90_6")),
                         "チェック": bool(rec_90.get("field-90_7", False)),
                         "備考": str(rec_90.get("field-90_9", "")),
+                        "納品日": parse_date_safe(rec_89.get("field-89_9")),   # 💡 売上日の左側に配置
+                        "納請区分": bool(rec_89.get("field-89_10", False)), # 💡 売上日の左側に配置（チェックボックス）
                         "売上日": parse_date_safe(rec_89.get("field-89_1")),
-                        "請求数量": str(rec_89.get("field-89_3", "")),
-                        "納品日": parse_date_safe(rec_89.get("field-89_9")),
-                        "納請区分": bool(rec_89.get("field-89_10", False))
+                        "請求数量": str(rec_89.get("field-89_3", ""))
                     })
             
             df_flat = pd.DataFrame(flat_data)
@@ -258,10 +258,10 @@ with tab1:
                     "仕上日": st.column_config.DateColumn("仕上日", format="YYYY-MM-DD"),
                     "チェック": st.column_config.CheckboxColumn("チェック"),
                     "備考": st.column_config.TextColumn("備考"),
-                    "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
-                    "請求数量": st.column_config.TextColumn("請求数量", disabled=True),
                     "納品日": st.column_config.DateColumn("納品日", format="YYYY-MM-DD", help="納品日（field-89_9）"),
                     "納請区分": st.column_config.CheckboxColumn("納請区分", help="チェック：納品 / 未チェック：請求 (field-89_10)"),
+                    "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
+                    "請求数量": st.column_config.TextColumn("請求数量", disabled=True),
                 }
             )
             
@@ -522,7 +522,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
             st.error(f"❌ {fail_count} 件の保存に失敗しました。")
 
 # ==========================================
-# タブ2：納品書発行（タブ1で入力された納品日・納請区分を自動反映）
+# タブ2：納品書発行（タブ1の納品チェックを自動反映）
 # ==========================================
 with tab2:
     st.header("📦 納品書発行")
@@ -546,7 +546,6 @@ with tab2:
     else:
         st.success(f"✨ 納品対象の明細が **{len(delivery_rows)} 件** 検出されました。")
         
-        # 確認用のプレビューテーブル表示
         df_preview = pd.DataFrame(delivery_rows)
         st.dataframe(df_preview, use_container_width=True)
         
