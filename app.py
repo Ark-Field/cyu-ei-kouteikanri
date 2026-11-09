@@ -267,6 +267,7 @@ with tab1:
                         # 請求関連 (field-89)
                         "売上日": parse_date_safe(rec_89.get("field-89_1")),
                         "請求数量": clean_val(rec_89.get("field-89_3", "")),
+                        "備考_請求": clean_val(rec_89.get("field-89_4", "")),
                         "請求": False
                     })
             
@@ -301,6 +302,7 @@ with tab1:
                     "在庫出荷": st.column_config.CheckboxColumn("在庫出荷", help="チェックすると在庫出荷扱いになります"),
                     "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
                     "請求数量": st.column_config.TextColumn("請求数量"),
+                    "備考_請求": st.column_config.TextColumn("備考（請求）"),
                     "請求": st.column_config.CheckboxColumn("請求", help="チェックすると請求書発行の対象になります"),
                 }
             )
@@ -518,15 +520,35 @@ if st.button("💾 チェックを入れたデータを データベース に�
             orig_sub_89 = original_rec.get("field-89", [])
             sub89_list = []
             if source_tab == "flat":
+                row_89 = first_row
+                sale_date_val = row_89["売上日"]
+                sale_date_str = ""
+                if pd.notna(sale_date_val):
+                    if isinstance(sale_date_val, (date, datetime)):
+                        sale_date_str = sale_date_val.strftime("%Y-%m-%d")
+                    else:
+                        parsed_s = parse_date_safe(sale_date_val)
+                        if parsed_s:
+                            sale_date_str = parsed_s.strftime("%Y-%m-%d")
+
                 if isinstance(orig_sub_89, list) and len(orig_sub_89) > 0:
                     item_89 = copy.deepcopy(orig_sub_89[0])
                     rec_dict_89 = item_89.get("record", {})
+                    rec_dict_89["field-89_1"] = sale_date_str
+                    rec_dict_89["field-89_3"] = clean_val(row_89["請求数量"]) or "0"
+                    rec_dict_89["field-89_4"] = clean_val(row_89["備考_請求"])
                     for k in ["field-89_5", "field-89_6"]:
                         rec_dict_89.pop(k, None)
                     item_89["record"] = rec_dict_89
                     sub89_list.append(item_89)
                 else:
-                    sub89_list.append({"record": {}})
+                    sub89_list.append({
+                        "record": {
+                            "field-89_1": sale_date_str,
+                            "field-89_3": clean_val(first_row["請求数量"]) or "0",
+                            "field-89_4": clean_val(first_row["備考_請求"])
+                        }
+                    })
                 record_payload["field-89"] = sub89_list
             else:
                 cleaned_sub89 = []
@@ -609,7 +631,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
             st.error(f"❌ {fail_count} 件の保存に失敗しました。")
 
 # ==========================================
-# タブ2：納品書発行（A4横・納品元情報追加・保存ボタンなし）
+# タブ2：納品書発行
 # ==========================================
 with tab2:
     st.header("📦 納品書発行")
@@ -814,7 +836,6 @@ with tab2:
             """
             st.success("A4横対応・納品元情報付きの納品書が生成されました！")
             
-            # Base64エンコードしてiframeで安定表示（TypeErrorを完全に防止）
             b64_html = base64.b64encode(html_content.encode("utf-8")).decode("utf-8")
             st.components.v1.iframe(f"data:text/html;base64,{b64_html}", height=600, scrolling=True)
 
@@ -822,8 +843,8 @@ with tab2:
 # タブ3：請求書発行
 # ==========================================
 with tab3:
-    st.header("📄 請求書発行（口座指定可）")
-    st.info("💡 タブ1の明細行で**「請求」**のチェックボックスにチェックが入っているデータから請求書を作成します。")
+    st.header("📄 請求書発行（出版社別・口座指定可）")
+    st.info("💡 タブ1の明細行で**「請求」**のチェックボックスにチェックが入っているデータを、**出版社名ごと**にまとめて請求書を作成します。")
     
     bc1, bc2, bc3 = st.columns(3)
     with bc1:
@@ -844,7 +865,8 @@ with tab3:
                     "書名": clean_val(row.get("書名", "")),
                     "売上日": row.get("売上日"),
                     "請求数量": clean_val(row.get("請求数量", "0")),
-                    "単価": clean_val(row.get("単価", "0"))
+                    "単価": clean_val(row.get("単価", "0")),
+                    "備考": clean_val(row.get("備考_請求", ""))
                 })
     else:
         invoice_rows = []
@@ -857,92 +879,215 @@ with tab3:
         df_inv_preview = pd.DataFrame(invoice_rows)
         st.dataframe(df_inv_preview, use_container_width=True)
         
-        if st.button("🚀 請求書プレビュー / 印刷（PDF）を作成", type="primary", key="btn_pdf_invoice"):
+        if st.button("🚀 出版社別 請求書プレビュー / 印刷を作成", type="primary", key="btn_pdf_invoice"):
+            from collections import defaultdict
+            grouped_invoice = defaultdict(list)
+            for r in invoice_rows:
+                grouped_invoice[r["出版社名"]].append(r)
+                
             inv_html = f"""
             <html>
             <head>
                 <meta charset="utf-8">
                 <style>
-                    body {{ font-family: 'Helvetica Neue', Arial, sans-serif; padding: 30px; color: #333; }}
-                    h1 {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; }}
-                    .meta {{ display: flex; justify-content: space-between; margin-bottom: 20px; }}
-                    table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
-                    th, td {{ border: 1px solid #ddd; padding: 10px; text-align: left; }}
-                    th {{ background-color: #f2f2f2; }}
-                    .right {{ text-align: right; }}
-                    .box {{ border: 1px solid #333; padding: 15px; margin-top: 20px; background-color: #f9f9f9; width: 350px; }}
+                    @page {{
+                        size: A4 portrait;
+                        margin: 15mm;
+                    }}
+                    body {{
+                        font-family: 'Helvetica Neue', Arial, sans-serif;
+                        color: #333;
+                        margin: 0;
+                        padding: 0;
+                        background: #fff;
+                    }}
+                    .invoice-page {{
+                        width: 180mm;
+                        min-height: 250mm;
+                        page-break-after: always;
+                        margin-bottom: 20px;
+                        padding-bottom: 20px;
+                        border-bottom: 2px dashed #ccc;
+                        box-sizing: border-box;
+                    }}
+                    h1 {{
+                        text-align: center;
+                        border-bottom: 2px solid #333;
+                        padding-bottom: 8px;
+                        margin-bottom: 15px;
+                        font-size: 24px;
+                        letter-spacing: 4px;
+                    }}
+                    .meta {{
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: flex-start;
+                        margin-bottom: 20px;
+                        font-size: 14px;
+                    }}
+                    .customer-name {{
+                        font-size: 24px;
+                        font-weight: bold;
+                        border-bottom: 2px solid #333;
+                        padding-bottom: 4px;
+                        display: inline-block;
+                        margin-bottom: 10px;
+                    }}
+                    .supplier-info {{
+                        text-align: right;
+                        font-size: 13px;
+                        line-height: 1.4;
+                    }}
+                    .summary-box {{
+                        background-color: #f8f9fa;
+                        border: 1px solid #ced4da;
+                        padding: 12px 15px;
+                        margin-bottom: 20px;
+                        font-size: 15px;
+                    }}
+                    table {{
+                        width: 100%;
+                        border-collapse: collapse;
+                        margin-top: 10px;
+                        margin-bottom: 20px;
+                        font-size: 13px;
+                    }}
+                    th, td {{
+                        border: 1px solid #ccc;
+                        padding: 8px 10px;
+                        text-align: left;
+                    }}
+                    th {{
+                        background-color: #e9ecef;
+                        font-weight: bold;
+                    }}
+                    .right {{
+                        text-align: right;
+                    }}
+                    .bank-box {{
+                        border: 1px solid #333;
+                        padding: 12px;
+                        margin-top: 15px;
+                        background-color: #f9f9f9;
+                        width: 320px;
+                        font-size: 13px;
+                        line-height: 1.4;
+                    }}
                     @media print {{
                         body {{ padding: 0; }}
                         .no-print {{ display: none; }}
+                        .invoice-page {{ border-bottom: none; }}
                     }}
                 </style>
             </head>
             <body>
-                <h1>請 求 書</h1>
-                <div class="meta">
-                    <div>
-                        <p><strong>宛先:</strong> 御中</p>
-                        <p><strong>発行日:</strong> {datetime.now().strftime('%Y-%m-%d')}</p>
-                    </div>
-                </div>
-                
-                <table>
-                    <tr>
-                        <th>出版社名</th>
-                        <th>書名</th>
-                        <th>売上日</th>
-                        <th class="right">請求数量</th>
-                        <th class="right">単価</th>
-                        <th class="right">金額</th>
-                    </tr>
             """
-            grand_total = 0
-            for row in invoice_rows:
-                pub = row["出版社名"]
-                title = row["書名"]
-                s_date = clean_val(row["売上日"])
-                q_str = clean_val(row["請求数量"])
-                p_str = clean_val(row["単価"])
+            
+            for pub_name, items in grouped_invoice.items():
+                # 売上日の最小・最大から売上期間を算出
+                sale_dates = [parse_date_safe(i["売上日"]) for i in items if parse_date_safe(i["売上日"])]
+                if sale_dates:
+                    min_d = min(sale_dates).strftime('%Y年%m月%d日')
+                    max_d = max(sale_dates).strftime('%Y年%m月%d日')
+                    period_str = f"{min_d} ～ {max_d}" if min_d != max_d else min_d
+                else:
+                    period_str = datetime.now().strftime('%Y年%m月度')
+
+                # 金額計算
+                subtotal = 0
+                for item in items:
+                    q_str = clean_val(item["請求数量"])
+                    p_str = clean_val(item["単価"])
+                    q_num = int(q_str) if q_str.isdigit() else 0
+                    try:
+                        p_num = float(p_str) if p_str else 0.0
+                    except ValueError:
+                        p_num = 0.0
+                    subtotal += q_num * p_num
                 
-                q_num = int(q_str) if q_str.isdigit() else 0
-                try:
-                    p_num = float(p_str) if p_str else 0.0
-                except ValueError:
-                    p_num = 0.0
+                tax_amount = round(subtotal * 0.10)
+                grand_total = subtotal + tax_amount
+
+                inv_html += f"""
+                <div class="invoice-page">
+                    <h1>請 求 書</h1>
+                    <div class="meta">
+                        <div>
+                            <span class="customer-name">{pub_name if pub_name else '（出版社名未設定）'} 御中</span><br>
+                            <p style="margin: 5px 0 0 0;">下記のとおりご請求申し上げます。</p>
+                        </div>
+                        <div class="supplier-info">
+                            <strong>(株)中永製本所</strong><br>
+                            埼玉県さいたま市岩槻区真福寺1400<br>
+                            TEL 048-798-7377<br>
+                            <strong>発行日:</strong> {datetime.now().strftime('%Y-%m-%d')}
+                        </div>
+                    </div>
                     
-                sub_total = q_num * p_num
-                grand_total += sub_total
+                    <div class="summary-box">
+                        <table style="width: 100%; border: none; margin: 0;">
+                            <tr style="border: none;">
+                                <td style="border: none; padding: 2px 0;"><strong>売上期間:</strong> {period_str}</td>
+                                <td style="border: none; padding: 2px 0; text-align: right; font-size: 16px;"><strong>ご請求金額合計（税込）: ￥{grand_total:,.0f}</strong></td>
+                            </tr>
+                            <tr style="border: none;">
+                                <td style="border: none; padding: 2px 0;"></td>
+                                <td style="border: none; padding: 2px 0; text-align: right; color: #555;">（うち消費税額等: ￥{tax_amount:,.0f}）</td>
+                            </tr>
+                        </table>
+                    </div>
+                    
+                    <table>
+                        <tr>
+                            <th style="width: 90px;">納品日</th>
+                            <th>書名</th>
+                            <th class="right" style="width: 70px;">請求数量</th>
+                            <th class="right" style="width: 90px;">単価</th>
+                            <th class="right" style="width: 100px;">金額</th>
+                            <th style="width: 120px;">備考</th>
+                        </tr>
+                """
+                
+                for item in items:
+                    q_str = clean_val(item["請求数量"])
+                    p_str = clean_val(item["単価"])
+                    q_num = int(q_str) if q_str.isdigit() else 0
+                    try:
+                        p_num = float(p_str) if p_str else 0.0
+                    except ValueError:
+                        p_num = 0.0
+                    line_total = q_num * p_num
+                    
+                    inv_html += f"""
+                        <tr>
+                            <td>{clean_val(item["売上日"])}</td>
+                            <td>{item["書名"]}</td>
+                            <td class="right">{q_num} 部</td>
+                            <td class="right">￥{p_num:,.2f}</td>
+                            <td class="right">￥{line_total:,.2f}</td>
+                            <td>{item["備考"]}</td>
+                        </tr>
+                    """
                 
                 inv_html += f"""
-                    <tr>
-                        <td>{pub}</td>
-                        <td>{title}</td>
-                        <td>{s_date}</td>
-                        <td class="right">{q_num} 部</td>
-                        <td class="right">¥{p_num:,.2f}</td>
-                        <td class="right">¥{sub_total:,.2f}</td>
-                    </tr>
-                """
-            inv_html += f"""
-                </table>
-                
-                <h2 style="text-align: right; margin-top: 20px;">ご請求金額合計: ￥{grand_total:,.2f} (税込)</h2>
-                
-                <div class="box">
-                    <b>【お振込先口座】</b><br>
-                    {bank_name} {bank_branch} ({bank_type}) {bank_account}<br>
-                    口座名義: {bank_holder}
+                    </table>
+                    
+                    <div class="bank-box">
+                        <b>【お振込先口座】</b><br>
+                        {bank_name} {bank_branch} ({bank_type}) {bank_account}<br>
+                        口座名義: {bank_holder}
+                    </div>
                 </div>
+                """
                 
-                <br>
-                <div class="no-print" style="text-align: center; margin-top: 20px;">
-                    <button onclick="window.print();" style="padding: 10px 20px; font-size: 16px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ この請求書を印刷 / PDF保存する</button>
+            inv_html += f"""
+                <div class="no-print" style="text-align: center; margin-top: 30px;">
+                    <button onclick="window.print();" style="padding: 12px 24px; font-size: 16px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ 請求書を一括印刷 / PDF保存する</button>
                 </div>
             </body>
             </html>
             """
-            st.success("請求書が生成されました！")
             
-            # 請求書側も同様にiframe表示にして安定化
+            st.success("出版社別の請求書が生成されました！")
             b64_inv_html = base64.b64encode(inv_html.encode("utf-8")).decode("utf-8")
             st.components.v1.iframe(f"data:text/html;base64,{b64_inv_html}", height=600, scrolling=True)
