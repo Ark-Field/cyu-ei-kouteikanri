@@ -10,7 +10,7 @@ import streamlit as st
 # 1. ページ基本設定
 # ==========================================
 st.set_page_config(page_title="受注一覧表", layout="wide")
-st.title("📊 受注一覧表")
+st.title("📊 受注一覧表 ＆ 付物管理システム")
 
 # ==========================================
 # 2. Secrets設定
@@ -25,7 +25,7 @@ else:
 APP_ID = 34  # @pocket対象アプリID
 
 # ==========================================
-# 3. APIデータ取得関数（期間 ＋ 出版社名の併用対応）
+# 3. APIデータ取得関数
 # ==========================================
 def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, target_publisher=None):
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
@@ -33,22 +33,18 @@ def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, t
     
     params = {}
     
-    # 1. 受注番号指定の優先検索
     if target_order_no:
         params["query"] = f'field-2 = "{target_order_no}"'
     else:
         query_parts = []
-        # 2. 期間条件の追加
         if start_date and end_date:
             start_str = start_date.strftime("%Y-%m-%d")
             end_str = end_date.strftime("%Y-%m-%d")
             query_parts.append(f'field-1 >= "{start_str}" and field-1 <= "{end_str}"')
         
-        # 3. 出版社名条件の追加（部分一致）
         if target_publisher:
             query_parts.append(f'field-8 like "{target_publisher}"')
         
-        # 条件を `and` で結合
         if query_parts:
             params["query"] = " and ".join(query_parts)
     
@@ -73,19 +69,16 @@ def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, t
                 merged_body["_recordId"] = item.get("Id", item.get("recordId", item.get("ResultId", rec_body.get("Id", ""))))
                 parsed_records.append(merged_body)
             
-            # ローカルでの念のためフィルタリング確認
             if target_order_no and parsed_records:
                 matched = [r for r in parsed_records if str(r.get("field-2", "")) == str(target_order_no)]
                 if matched:
                     return matched
             
-            # 期間＆出版社名でのローカル二重フィルタリング（安全確保）
             filtered_records = []
             start_str = start_date.strftime("%Y-%m-%d") if start_date else None
             end_str = end_date.strftime("%Y-%m-%d") if end_date else None
             
             for r in parsed_records:
-                # 日付チェック
                 if start_str and end_str:
                     raw_date_str = str(r.get("field-1", ""))
                     if not raw_date_str or raw_date_str.lower() in ["nan", "none"]:
@@ -94,7 +87,6 @@ def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, t
                     if len(r_date) != 10 or not (start_str <= r_date <= end_str):
                         continue
                 
-                # 出版社名チェック
                 if target_publisher:
                     r_pub = str(r.get("field-8", ""))
                     if target_publisher.lower() not in r_pub.lower():
@@ -124,7 +116,6 @@ def parse_date_safe(val):
 query_params = st.query_params
 url_order_no = query_params.get("ord", None)
 
-# 初回起動時やURLパラメータがある場合、セッションに自動ロード
 if "api_records" not in st.session_state or url_order_no:
     if url_order_no:
         with st.spinner(f"DBから受注番号: {url_order_no} のデータを取得中..."):
@@ -135,16 +126,17 @@ if "api_records" not in st.session_state or url_order_no:
         st.session_state["api_records"] = fetch_pocket_records(start_date=default_start, end_date=default_end)
 
 # ==========================================
-# 5. タブ構成の定義
+# 5. タブ構成の定義（付物明細タブを追加）
 # ==========================================
-tab1, tab2, tab3 = st.tabs([
+tab1, tab_accessory, tab2, tab3 = st.tabs([
     "📋 タブ1: 受注一覧表", 
+    "🏷️ 付物明細（表・カバー・帯・カード）",
     "📦 タブ2: 納品書発行", 
     "📄 タブ3: 請求書発行（口座指定可）"
 ])
 
 # ==========================================
-# タブ1：受注一覧表 ＆ 日付更新エディタ
+# タブ1：受注一覧表 ＆ 工程日・製本情報エディタ
 # ==========================================
 with tab1:
     st.header("📋 受注一覧表")
@@ -152,8 +144,7 @@ with tab1:
     if url_order_no:
         st.success(f"🔗 DBから受注番号 **{url_order_no}** のデータを起動しました！")
     
-    # 検索コントロール（期間指定 ＋ 出版社名併用 ＆ 受注番号指定）
-    with st.expander("🔍 検索条件の変更・絞り込み（期間 ＆ 出版社名 ＆ 受注番号）はこちら", expanded=bool(not url_order_no)):
+    with st.expander("🔍 検索条件の変更・絞り込みはこちら", expanded=bool(not url_order_no)):
         col_s1, col_s2 = st.columns(2)
         with col_s1:
             default_end = date.today()
@@ -295,7 +286,7 @@ with tab1:
             field_4 = str(selected_rows.iloc[0]["製本数"])
             field_5 = str(selected_rows.iloc[0]["単価"])
             
-            st.info(f"📌 現在選択中のレコード: **受注番号 {field_2} ({field_13})** （下のタブ2・3のPDF発行に連動しています）")
+            st.info(f"📌 現在選択中のレコード: **受注番号 {field_2} ({field_13})** （付物タブや納品書・請求書発行に連動しています）")
                 
         else:
             st.warning("⚠️ 該当するレコードが見つかりませんでした。")
@@ -306,55 +297,130 @@ with tab1:
         sample_rec = {}
         field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
 
-    st.divider()
-    
-    checked_rows_count = len(edited_flat_df[edited_flat_df["更新"] == True]) if 'edited_flat_df' in locals() else 0
-    if st.button(f"💾 チェックを入れた受注データ（{checked_rows_count}件）を データベース に一括上書き保存する", type="primary", key="btn_save_checked"):
-        checked_rows = edited_flat_df[edited_flat_df["更新"] == True]
-        if checked_rows.empty:
-            st.warning("⚠️ 上書き保存する行のガチャ「更新チェック」ボックスにチェックを入れてください。")
-        else:
-            headers = {
-                "X-At-Pocket-API-Key": POCKET_API_KEY, 
-                "Accept": "application/json", 
-                "Content-Type": "application/json"
+# ==========================================
+# タブ1.5（新設）：付物明細（表、カバー、帯、カード）
+# ==========================================
+with tab_accessory:
+    st.header("🏷️ 付物明細（表・カバー・帯・カード）管理")
+    st.info("💡 各種付物の『日付』は変更・更新が可能ですが、『印刷所』は参照専用（更新不可）となります。")
+
+    if api_records and len(api_records) > 0:
+        acc_flat_data = []
+        for record_idx, r in enumerate(api_records):
+            h_ord_no = str(r.get("field-2", ""))
+            h_pub = str(r.get("field-8", ""))
+            h_title = str(r.get("field-13", ""))
+            
+            sub_91 = r.get("field-91", [])
+            max_len_91 = len(sub_91) if isinstance(sub_91, list) and len(sub_91) > 0 else 1
+            
+            for i in range(max_len_91):
+                item_91 = sub_91[i] if isinstance(sub_91, list) and len(sub_91) > i else {}
+                rec_91 = item_91.get("record", item_91) if isinstance(item_91, dict) else {}
+                
+                acc_flat_data.append({
+                    "更新": False,
+                    "_record_idx": record_idx,
+                    "受注番号": h_ord_no,
+                    "出版社名": h_pub,
+                    "書名": h_title,
+                    "表 日付": parse_date_safe(rec_91.get("field-91_1")),
+                    "表 印刷所": str(rec_91.get("field-91_2", "")),
+                    "カバー 日付": parse_date_safe(rec_91.get("field-91_5")),
+                    "カバー 印刷所": str(rec_91.get("field-91_6", "")),
+                    "カード 日付": parse_date_safe(rec_91.get("field-91_9")),
+                    "カード 印刷所": str(rec_91.get("field-91_10", "")),
+                    "帯 日付": parse_date_safe(rec_91.get("field-91_13")),
+                    "帯 印刷所": str(rec_91.get("field-91_14", ""))
+                })
+        
+        df_acc = pd.DataFrame(acc_flat_data)
+        
+        edited_acc_df = st.data_editor(
+            df_acc,
+            num_rows="fixed",
+            key="grid_accessory_main",
+            use_container_width=True,
+            column_config={
+                "更新": st.column_config.CheckboxColumn("更新チェック", required=True, help="チェックを入れた行の付物データを@pocketに上書き保存します"),
+                "_record_idx": None,
+                "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
+                "出版社名": st.column_config.TextColumn("出版社名", disabled=True),
+                "書名": st.column_config.TextColumn("書名", disabled=True),
+                "表 日付": st.column_config.DateColumn("表 日付", format="YYYY-MM-DD"),
+                "表 印刷所": st.column_config.TextColumn("表 印刷所", disabled=True),
+                "カバー 日付": st.column_config.DateColumn("カバー 日付", format="YYYY-MM-DD"),
+                "カバー 印刷所": st.column_config.TextColumn("カバー 印刷所", disabled=True),
+                "カード 日付": st.column_config.DateColumn("カード 日付", format="YYYY-MM-DD"),
+                "カード 印刷所": st.column_config.TextColumn("カード 印刷所", disabled=True),
+                "帯 日付": st.column_config.DateColumn("帯 日付", format="YYYY-MM-DD"),
+                "帯 印刷所": st.column_config.TextColumn("帯 印刷所", disabled=True),
             }
-            success_count = 0
-            fail_count = 0
+        )
+    else:
+        st.warning("⚠️ 表示対象の受注データがありません。タブ1で検索を行ってください。")
+
+# ==========================================
+# 共通の一括上書き保存ボタン（タブ1＆付物タブ共通で動作）
+# ==========================================
+st.divider()
+
+if st.button("💾 チェックを入れたデータを データベース に一括上書き保存する", type="primary", key="btn_save_checked_all"):
+    # タブ1または付物タブでチェックされた行を判定
+    checked_rows = pd.DataFrame()
+    source_tab = None
+    
+    if 'edited_flat_df' in locals() and not edited_flat_df[edited_flat_df["更新"] == True].empty:
+        checked_rows = edited_flat_df[edited_flat_df["更新"] == True]
+        source_tab = "flat"
+    elif 'edited_acc_df' in locals() and not edited_acc_df[edited_acc_df["更新"] == True].empty:
+        checked_rows = edited_acc_df[edited_acc_df["更新"] == True]
+        source_tab = "acc"
+        
+    if checked_rows.empty:
+        st.warning("⚠️ 上書き保存する行の「更新チェック」ボックスにチェックを入れてください。")
+    else:
+        headers = {
+            "X-At-Pocket-API-Key": POCKET_API_KEY, 
+            "Accept": "application/json", 
+            "Content-Type": "application/json"
+        }
+        success_count = 0
+        fail_count = 0
+        
+        grouped_records = checked_rows.groupby("_record_idx")
+        
+        for r_idx, group_df in grouped_records:
+            r_idx = int(r_idx)
+            original_rec = api_records[r_idx]
+            record_id = original_rec.get("_recordId")
             
-            grouped_records = checked_rows.groupby("_record_idx")
+            if not record_id:
+                st.error("❌ レコードIDが見つかりませんでした。")
+                fail_count += 1
+                continue
             
-            for r_idx, group_df in grouped_records:
-                r_idx = int(r_idx)
-                original_rec = api_records[r_idx]
-                record_id = original_rec.get("_recordId")
-                
-                if not record_id:
-                    st.error("❌ レコードIDが見つかりませんでした。")
-                    fail_count += 1
-                    continue
-                
-                update_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records/{record_id}"
-                
-                first_row = group_df.iloc[0]
-                record_payload = {
-                    "field-2": str(first_row["受注番号"]),
-                    "field-1": str(first_row["受注日"]) if pd.notna(first_row["受注日"]) else "",
-                    "field-4": str(first_row["製本数"]),
-                    "field-5": str(first_row["単価"]),
-                }
-                
-                import copy
-                
-                # 1. field-90 の構築
-                orig_sub_90 = original_rec.get("field-90", [])
-                sub90_list = []
-                row_90 = group_df.iloc[0]
-                
+            update_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records/{record_id}"
+            first_row = group_df.iloc[0]
+            
+            # 親ヘッダー情報の維持
+            record_payload = {
+                "field-2": str(original_rec.get("field-2", "")),
+                "field-1": str(original_rec.get("field-1", "")),
+                "field-4": str(original_rec.get("field-4", "")),
+                "field-5": str(original_rec.get("field-5", "")),
+            }
+            
+            import copy
+            
+            # 1. field-90 の構築
+            orig_sub_90 = original_rec.get("field-90", [])
+            sub90_list = []
+            if source_tab == "flat":
+                row_90 = first_row
                 if isinstance(orig_sub_90, list) and len(orig_sub_90) > 0:
                     item_90 = copy.deepcopy(orig_sub_90[0])
                     rec_dict = item_90.get("record", {})
-                    
                     rec_dict["field-90_1"] = str(row_90["配本日"]) if pd.notna(row_90["配本日"]) else ""
                     rec_dict["field-90_3"] = str(row_90["折本日"]) if pd.notna(row_90["折本日"]) else ""
                     rec_dict["field-90_4"] = str(row_90["無線日"]) if pd.notna(row_90["無線日"]) else ""
@@ -362,105 +428,87 @@ with tab1:
                     rec_dict["field-90_6"] = str(row_90["仕上日"]) if pd.notna(row_90["仕上日"]) else ""
                     rec_dict["field-90_7"] = bool(row_90["チェック"])
                     rec_dict["field-90_9"] = str(row_90["備考"]) if pd.notna(row_90["備考"]) else ""
-                    
                     item_90["record"] = rec_dict
                     sub90_list.append(item_90)
                 else:
                     sub90_list.append({
                         "record": {
-                            "field-90_1": str(row_90["配本日"]) if pd.notna(row_90["配本日"]) else "",
-                            "field-90_3": str(row_90["折本日"]) if pd.notna(row_90["折本日"]) else "",
-                            "field-90_4": str(row_90["無線日"]) if pd.notna(row_90["無線日"]) else "",
-                            "field-90_5": str(row_90["三方日"]) if pd.notna(row_90["三方日"]) else "",
-                            "field-90_6": str(row_90["仕上日"]) if pd.notna(row_90["仕上日"]) else "",
-                            "field-90_7": bool(row_90["チェック"]),
-                            "field-90_9": str(row_90["備考"]) if pd.notna(row_90["備考"]) else "",
+                            "field-90_1": str(first_row["配本日"]) if pd.notna(first_row["配本日"]) else "",
+                            "field-90_3": str(first_row["折本日"]) if pd.notna(first_row["折本日"]) else "",
+                            "field-90_4": str(first_row["無線日"]) if pd.notna(first_row["無線日"]) else "",
+                            "field-90_5": str(first_row["三方日"]) if pd.notna(first_row["三方日"]) else "",
+                            "field-90_6": str(first_row["仕上日"]) if pd.notna(first_row["仕上日"]) else "",
+                            "field-90_7": bool(first_row["チェック"]),
+                            "field-90_9": str(first_row["備考"]) if pd.notna(first_row["備考"]) else "",
                             "field-90_2": ""
                         }
                     })
-
-                # 2. field-88 の構築
-                orig_sub_88 = original_rec.get("field-88", [])
-                sub88_list = []
-                if isinstance(orig_sub_88, list) and len(orig_sub_88) > 0:
-                    item_88 = copy.deepcopy(orig_sub_88[0])
-                    rec_dict = item_88.get("record", {})
-                    
-                    rec_dict["field-88_2"] = str(row_90["納品日"]) if pd.notna(row_90["納品日"]) else ""
-                    rec_dict["field-88_4"] = str(int(row_90["納品数"])) if str(row_90["納品数"]).isdigit() else "0"
-                    
-                    item_88["record"] = rec_dict
-                    sub88_list.append(item_88)
-                else:
-                    sub88_list.append({
-                        "record": {
-                            "field-88_1": "1",
-                            "field-88_2": str(row_90["納品日"]) if pd.notna(row_90["納品日"]) else "",
-                            "field-88_3": "本書",
-                            "field-88_4": str(int(row_90["納品数"])) if str(row_90["納品数"]).isdigit() else "0",
-                            "field-88_5": "",
-                            "field-88_6": []
-                        }
-                    })
-
-                # 3. field-89 の構築
-                orig_sub_89 = original_rec.get("field-89", [])
-                sub89_list = []
-                if isinstance(orig_sub_89, list) and len(orig_sub_89) > 0:
-                    item_89 = copy.deepcopy(orig_sub_89[0])
-                    rec_dict = item_89.get("record", {})
-                    
-                    rec_dict["field-89_1"] = str(row_90["売上日"]) if pd.notna(row_90["売上日"]) else ""
-                    rec_dict["field-89_3"] = str(int(row_90["請求数量"])) if str(row_90["請求数量"]).isdigit() else "0"
-                    
-                    rec_dict.pop("field-89_5", None)
-                    rec_dict.pop("field-89_6", None)
-                    
-                    item_89["record"] = rec_dict
-                    sub89_list.append(item_89)
-                else:
-                    sub89_list.append({
-                        "record": {
-                            "field-89_1": str(row_90["売上日"]) if pd.notna(row_90["売上日"]) else "",
-                            "field-89_2": "",
-                            "field-89_3": str(int(row_90["請求数量"])) if str(row_90["請求数量"]).isdigit() else "0",
-                            "field-89_4": "",
-                            "field-89_7": ""
-                        }
-                    })
-
                 record_payload["field-90"] = sub90_list
-                record_payload["field-88"] = sub88_list
-                record_payload["field-89"] = sub89_list
+            else:
+                record_payload["field-90"] = orig_sub_90
 
-                payload = {
-                    "apiVersion": 1.1,
-                    "record": record_payload
-                }
+            # 2. field-88 (納品) の維持
+            record_payload["field-88"] = original_rec.get("field-88", [])
 
-                try:
-                    res = requests.put(update_url, headers=headers, json=payload, timeout=15)
-                    if res.status_code in [200, 204]:
-                        success_count += 1
-                    else:
-                        st.error(f"❌ レコードID {record_id} の保存失敗 (ステータス {res.status_code}): {res.text}")
-                        fail_count += 1
-                except Exception as e:
-                    st.error(f"🚨 例外発生: {e}")
-                    fail_count += 1
-            
-            if success_count > 0:
-                st.success(f"✅ **{success_count} 件** のレコードデータを データベース に正常に一括上書き保存しました！")
-                if url_order_no:
-                    st.session_state["api_records"] = fetch_pocket_records(target_order_no=url_order_no)
+            # 3. field-89 (売上) の維持
+            record_payload["field-89"] = original_rec.get("field-89", [])
+
+            # 4. field-91 (付物明細) の構築
+            orig_sub_91 = original_rec.get("field-91", [])
+            sub91_list = []
+            if source_tab == "acc":
+                row_91 = first_row
+                if isinstance(orig_sub_91, list) and len(orig_sub_91) > 0:
+                    item_91 = copy.deepcopy(orig_sub_91[0])
+                    rec_dict_91 = item_91.get("record", {})
+                    rec_dict_91["field-91_1"] = str(row_91["表 日付"]) if pd.notna(row_91["表 日付"]) else ""
+                    rec_dict_91["field-91_5"] = str(row_91["カバー 日付"]) if pd.notna(row_91["カバー 日付"]) else ""
+                    rec_dict_91["field-91_9"] = str(row_91["カード 日付"]) if pd.notna(row_91["カード 日付"]) else ""
+                    rec_dict_91["field-91_13"] = str(row_91["帯 日付"]) if pd.notna(row_91["帯 日付"]) else ""
+                    # 印刷所フィールドは更新しないためそのまま維持
+                    item_91["record"] = rec_dict_91
+                    sub91_list.append(item_91)
                 else:
-                    default_end = date.today()
-                    default_start = default_end - timedelta(days=21)
-                    st.session_state["api_records"] = fetch_pocket_records(start_date=default_start, end_date=default_end)
-                st.rerun()
-                
-            if fail_count > 0:
-                st.error(f"❌ {fail_count} 件の保存に失敗しました。")
+                    sub91_list.append({
+                        "record": {
+                            "field-91_1": str(first_row["表 日付"]) if pd.notna(first_row["表 日付"]) else "",
+                            "field-91_5": str(first_row["カバー 日付"]) if pd.notna(first_row["カバー 日付"]) else "",
+                            "field-91_9": str(first_row["カード 日付"]) if pd.notna(first_row["カード 日付"]) else "",
+                            "field-91_13": str(first_row["帯 日付"]) if pd.notna(first_row["帯 日付"]) else ""
+                        }
+                    })
+                record_payload["field-91"] = sub91_list
+            else:
+                record_payload["field-91"] = orig_sub_91
+
+            payload = {
+                "apiVersion": 1.1,
+                "record": record_payload
+            }
+
+            try:
+                res = requests.put(update_url, headers=headers, json=payload, timeout=15)
+                if res.status_code in [200, 204]:
+                    success_count += 1
+                else:
+                    st.error(f"❌ レコードID {record_id} の保存失敗 (ステータス {res.status_code}): {res.text}")
+                    fail_count += 1
+            except Exception as e:
+                st.error(f"🚨 例外発生: {e}")
+                fail_count += 1
+        
+        if success_count > 0:
+            st.success(f"✅ **{success_count} 件** のデータをデータベースに正常に一括上書き保存しました！")
+            if url_order_no:
+                st.session_state["api_records"] = fetch_pocket_records(target_order_no=url_order_no)
+            else:
+                default_end = date.today()
+                default_start = default_end - timedelta(days=21)
+                st.session_state["api_records"] = fetch_pocket_records(start_date=default_start, end_date=default_end)
+            st.rerun()
+            
+        if fail_count > 0:
+            st.error(f"❌ {fail_count} 件の保存に失敗しました。")
 
 # ==========================================
 # タブ2：納品書発行
@@ -655,7 +703,7 @@ with tab3:
                 </tr>
         """
         for _, row in edited_sales.iterrows():
-            s_date = str(row["売上日"]) if pd.notna(row["売X上日"]) else ""
+            s_date = str(row["売上日"]) if pd.notna(row["売上日"]) else ""
             s_qty = row["請求数量"]
             try:
                 q_num = int(s_qty) if str(s_qty).isdigit() else 0
