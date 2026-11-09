@@ -7,12 +7,20 @@ import pandas as pd
 from datetime import datetime, timedelta, date
 import streamlit as st
 
+# ReportLab関連のインポート（PDF出力用）
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfgen import canvas
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+
 # ==========================================
 # 1. ページ基本設定（Streamlitヘッダー非表示）
 # ==========================================
 st.set_page_config(page_title="受注一覧表", layout="wide", initial_sidebar_state="collapsed")
 
-# Streamlitのデフォルト上部タイトル/ヘッダーをCSSで完全に非表示にする
 hide_streamlit_style = """
     <style>
     #MainMenu {visibility: hidden;}
@@ -25,7 +33,33 @@ st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 st.title("📊 受注一覧表 ＆ 付物・納品・請求管理システム")
 
 # ==========================================
-# 2. Secrets設定
+# 2. 日本語フォント登録処理（ReportLab用）
+# ==========================================
+def setup_japanese_font():
+    local_font_path = "NotoSansJP-Regular.ttf"
+    if os.path.exists(local_font_path):
+        try:
+            pdfmetrics.registerFont(TTFont("JPFont", local_font_path))
+            return "JPFont"
+        except Exception as e:
+            print(f"同梱フォント登録エラー: {e}")
+
+    win_font = os.path.join(
+        os.environ.get("SystemRoot", "C:\\Windows"), "Fonts", "msgothic.ttc"
+    )
+    if os.path.exists(win_font):
+        try:
+            pdfmetrics.registerFont(TTFont("JPFont", win_font, subfontIndex=0))
+            return "JPFont"
+        except Exception as e:
+            print(f"Windowsフォント登録エラー: {e}")
+
+    return "Helvetica"
+
+FONT_NAME = setup_japanese_font()
+
+# ==========================================
+# 3. Secrets設定
 # ==========================================
 if "pocket" in st.secrets:
     POCKET_API_KEY = st.secrets["pocket"].get("api_key", "XZtsg3OrDFOh0VayOI83j84Oc3YIzm7oujbI0T08")
@@ -37,10 +71,9 @@ else:
 APP_ID = 34  # @pocket対象アプリID
 
 # ==========================================
-# 3. 便利関数（データクリーニング・日付パース）
+# 4. 便利関数（データクリーニング・日付パース・ファイル出力）
 # ==========================================
 def clean_val(val):
-    """None、NaN、文字列の 'none' や 'nan' を完全に空文字に変換する"""
     if val is None:
         return ""
     if pd.isna(val):
@@ -61,8 +94,117 @@ def parse_date_safe(val):
     except ValueError:
         return None
 
+def to_excel_bytes(df):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Sheet1")
+    output.seek(0)
+    return output
+
+# --- 受注一覧表のPDF生成 ---
+def generate_order_pdf(df):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        leftMargin=15,
+        rightMargin=15,
+        topMargin=15,
+        bottomMargin=15,
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=14, leading=16, textColor=colors.HexColor("#1E3A8A"))
+    header_style = ParagraphStyle("Header", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7.5, leading=9, textColor=colors.white, alignment=1)
+    cell_style = ParagraphStyle("Cell", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7, leading=8.5, textColor=colors.HexColor("#1E293B"))
+
+    elements = [
+        Paragraph("<b>受注一覧表 ＆ 工程・納品・請求管理</b>", title_style),
+        Spacer(1, 6),
+        Paragraph(f"<font size=8 color='#64748B'>発行日: {date.today().strftime('%Y年%m月%d日')}</font>", styles["Normal"]),
+        Spacer(1, 10),
+    ]
+
+    # 出力対象カラムの選定（不要な内部列を除外）
+    exclude_cols = ["更新", "_record_idx", "詳細"]
+    target_cols = [c for c in df.columns if c not in exclude_cols]
+
+    table_data = [[Paragraph(c, header_style) for c in target_cols]]
+    for _, row in df.iterrows():
+        table_data.append([Paragraph(str(row[c]) if pd.notna(row[c]) else "", cell_style) for c in target_cols])
+
+    # ページ幅(842 - 30 = 812)に合わせて列幅を均等配分
+    col_w = 812 / len(target_cols)
+    col_widths = [col_w] * len(target_cols)
+
+    t = Table(table_data, colWidths=col_widths, repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
+    ]))
+
+    elements.append(t)
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+# --- 付物明細一覧表のPDF生成 ---
+def generate_accessory_pdf(df):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        leftMargin=20,
+        rightMargin=20,
+        topMargin=20,
+        bottomMargin=20,
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=14, leading=16, textColor=colors.HexColor("#1E3A8A"))
+    header_style = ParagraphStyle("Header", parent=styles["Normal"], fontName=FONT_NAME, fontSize=8, leading=10, textColor=colors.white, alignment=1)
+    cell_style = ParagraphStyle("Cell", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7.5, leading=9, textColor=colors.HexColor("#1E293B"))
+
+    elements = [
+        Paragraph("<b>付物明細一覧表（表・カバー・帯・カード）</b>", title_style),
+        Spacer(1, 6),
+        Paragraph(f"<font size=8 color='#64748B'>発行日: {date.today().strftime('%Y年%m月%d日')}</font>", styles["Normal"]),
+        Spacer(1, 10),
+    ]
+
+    exclude_cols = ["更新", "_record_idx"]
+    target_cols = [c for c in df.columns if c not in exclude_cols]
+
+    table_data = [[Paragraph(c, header_style) for c in target_cols]]
+    for _, row in df.iterrows():
+        table_data.append([Paragraph(str(row[c]) if pd.notna(row[c]) else "", cell_style) for c in target_cols])
+
+    col_w = 772 / len(target_cols)
+    col_widths = [col_w] * len(target_cols)
+
+    t = Table(table_data, colWidths=col_widths, repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
+    ]))
+
+    elements.append(t)
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
 # ==========================================
-# 4. URLパラメータのチェック
+# 5. URLパラメータのチェック
 # ==========================================
 query_params = st.query_params
 url_order_no = query_params.get("ord", None)
@@ -158,7 +300,7 @@ if "api_records" not in st.session_state or url_order_no:
         st.session_state["api_records"] = fetch_pocket_records(start_date=default_start, end_date=default_end)
 
 # ==========================================
-# 5. タブ構成の定義
+# 6. タブ構成の定義
 # ==========================================
 tab1, tab_accessory, tab2, tab3 = st.tabs([
     "📋 タブ1: 受注一覧表", 
@@ -226,7 +368,6 @@ with tab1:
                 h_qty = clean_val(r.get("field-4", ""))
                 h_price = clean_val(r.get("field-5", ""))
                 
-                # ★ @pocket 詳細画面へのリンクURL生成
                 rec_id = clean_val(r.get("_recordId", ""))
                 detail_url = f"{POCKET_BASE_URL}/apps/{APP_ID}/records/{rec_id}/detail" if rec_id and rec_id.lower() != "none" else ""
                 
@@ -253,21 +394,19 @@ with tab1:
                     flat_data.append({
                         "更新": False,
                         "_record_idx": record_idx,
-                        "詳細": detail_url,  # ★ 詳細リンク列
+                        "詳細": detail_url,
                         "受注番号": h_ord_no,
                         "受注日": h_ord_date,
                         "出版社名": h_pub,
                         "書名": h_title,
                         "製本数": h_qty,
                         "単価": h_price,
-                        # 工程日 (field-90)
                         "配本日": parse_date_safe(rec_90.get("field-90_1")),
                         "折本日": parse_date_safe(rec_90.get("field-90_3")),
                         "無線日": parse_date_safe(rec_90.get("field-90_4")),
                         "三方日": parse_date_safe(rec_90.get("field-90_5")),
                         "仕上日": parse_date_safe(rec_90.get("field-90_6")),
                         "備考": clean_val(rec_90.get("field-90_9", "")),
-                        # 納品関連 (field-88)
                         "納品日": parse_date_safe(rec_88.get("field-88_2")),
                         "納品数": clean_val(rec_88.get("field-88_4", "")),
                         "PL数": clean_val(rec_88.get("field-88_7", "")),
@@ -275,7 +414,6 @@ with tab1:
                         "配車区分": val_88_10,
                         "納品": False,
                         "在庫出荷": False,
-                        # 請求関連 (field-89)
                         "売上日": parse_date_safe(rec_89.get("field-89_1")),
                         "請求数量": clean_val(rec_89.get("field-89_3", "")),
                         "備考_請求": clean_val(rec_89.get("field-89_7", "")),
@@ -323,6 +461,28 @@ with tab1:
                 }
             )
             
+            # --- 受注一覧表のダウンロードボタン ---
+            st.markdown("---")
+            col_dl1, col_dl2 = st.columns(2)
+            with col_dl1:
+                excel_bytes_ord = to_excel_bytes(df_flat)
+                st.download_button(
+                    label="📥 受注一覧表を Excel でダウンロード",
+                    data=excel_bytes_ord,
+                    file_name=f"受注一覧表_{date.today().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="dl_excel_order"
+                )
+            with col_dl2:
+                pdf_bytes_ord = generate_order_pdf(df_flat)
+                st.download_button(
+                    label="🖨️ 受注一覧表を PDF でダウンロード",
+                    data=pdf_bytes_ord,
+                    file_name=f"受注一覧表_{date.today().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf",
+                    key="dl_pdf_order"
+                )
+
             selected_rows = edited_flat_df[edited_flat_df["更新"] == True]
             if selected_rows.empty:
                 selected_rows = edited_flat_df.iloc[[0]]
@@ -407,6 +567,29 @@ with tab_accessory:
                 "帯 印刷所": st.column_config.TextColumn("帯 印刷所", disabled=True),
             }
         )
+
+        # --- 付物明細一覧表のダウンロードボタン ---
+        st.markdown("---")
+        col_dl3, col_dl4 = st.columns(2)
+        with col_dl3:
+            excel_bytes_acc = to_excel_bytes(df_acc)
+            st.download_button(
+                label="📥 付物明細一覧表を Excel でダウンロード",
+                data=excel_bytes_acc,
+                file_name=f"付物明細一覧表_{date.today().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_excel_acc"
+            )
+        with col_dl4:
+            pdf_bytes_acc = generate_accessory_pdf(df_acc)
+            st.download_button(
+                label="🖨️ 付物明細一覧表を PDF でダウンロード",
+                data=pdf_bytes_acc,
+                file_name=f"付物明細一覧表_{date.today().strftime('%Y%m%d')}.pdf",
+                mime="application/pdf",
+                key="dl_pdf_acc"
+            )
+
     else:
         st.warning("⚠️ 表示対象の受注データがありません。タブ1で検索を行ってください。")
 
