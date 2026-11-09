@@ -226,6 +226,7 @@ with tab1:
                     item_89 = sub_89[i] if isinstance(sub_89, list) and len(sub_89) > i else {}
                     rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
                     
+                    # Python上での状態管理用（APIへは書き戻さない）
                     val_88_12 = clean_val(rec_88.get("field-88_12", ""))
                     val_89_11 = clean_val(rec_89.get("field-89_11", ""))
                     val_88_13 = clean_val(rec_88.get("field-88_13", ""))
@@ -240,7 +241,7 @@ with tab1:
                         "書名": h_title,
                         "製本数": h_qty,
                         "単価": h_price,
-                        # 工程日 (field-90) ※チェック項目は除外
+                        # 工程日 (field-90)
                         "配本日": parse_date_safe(rec_90.get("field-90_1")),
                         "折本日": parse_date_safe(rec_90.get("field-90_3")),
                         "無線日": parse_date_safe(rec_90.get("field-90_4")),
@@ -288,11 +289,11 @@ with tab1:
                     "PL数": st.column_config.TextColumn("PL数", help="PL数（field-88_7）"),
                     "見本数量": st.column_config.TextColumn("見本数量", help="見本数量（field-88_8）"),
                     "配車区分": st.column_config.TextColumn("配車区分", help="配車区分（field-88_10）"),
-                    "納品区分": st.column_config.SelectboxColumn("納品区分", options=["", "未", "納品", "済"], help="納品区分（field-88_12）"),
-                    "在庫出荷": st.column_config.SelectboxColumn("在庫出荷", options=["", "在庫から"], help="在庫出荷（field-88_13）"),
+                    "納品区分": st.column_config.SelectboxColumn("納品区分", options=["", "未", "納品", "済"], help="納品区分（画面上での判別用）"),
+                    "在庫出荷": st.column_config.SelectboxColumn("在庫出荷", options=["", "在庫から"], help="在庫出荷（画面上での判別用）"),
                     "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
                     "請求数量": st.column_config.TextColumn("請求数量"),
-                    "請求区分": st.column_config.SelectboxColumn("請求区分", options=["", "未", "請求", "済"], help="請求区分（field-89_11）"),
+                    "請求区分": st.column_config.SelectboxColumn("請求区分", options=["", "未", "請求", "済"], help="請求区分（画面上での判別用）"),
                 }
             )
             
@@ -433,7 +434,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
                 "field-5": clean_val(original_rec.get("field-5", "")),
             }
             
-            # 1. field-90 (工程日) の構築（チェック項目を省く）
+            # 1. field-90 (工程日) の構築
             orig_sub_90 = original_rec.get("field-90", [])
             sub90_list = []
             if source_tab == "flat":
@@ -465,7 +466,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
             else:
                 record_payload["field-90"] = orig_sub_90
 
-            # 2. field-88 (納品明細) の構築
+            # 2. field-88 (納品明細) の構築（単いた選択項目は書き戻さず、元データの値をそのまま保持してエラーを回避）
             orig_sub_88 = original_rec.get("field-88", [])
             sub88_list = []
             if source_tab == "flat":
@@ -488,8 +489,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     rec_dict_88["field-88_7"] = clean_val(row_88["PL数"]) or "0"
                     rec_dict_88["field-88_8"] = clean_val(row_88["見本数量"]) or "0"
                     rec_dict_88["field-88_10"] = clean_val(row_88["配車区分"])
-                    rec_dict_88["field-88_12"] = clean_val(row_88["納品区分"])
-                    rec_dict_88["field-88_13"] = clean_val(row_88["在庫出荷"])
+                    # ※ 単一選択（納品区分・在庫出荷）はAPIに送らず元データを維持
                     
                     item_88["record"] = rec_dict_88
                     sub88_list.append(item_88)
@@ -500,16 +500,14 @@ if st.button("💾 チェックを入れたデータを データベース に�
                             "field-88_4": clean_val(first_row["納品数"]) or "0",
                             "field-88_7": clean_val(first_row["PL数"]) or "0",
                             "field-88_8": clean_val(first_row["見本数量"]) or "0",
-                            "field-88_10": clean_val(first_row["配車区分"]),
-                            "field-88_12": clean_val(first_row["納品区分"]),
-                            "field-88_13": clean_val(first_row["在庫出荷"])
+                            "field-88_10": clean_val(first_row["配車区分"])
                         }
                     })
                 record_payload["field-88"] = sub88_list
             else:
                 record_payload["field-88"] = orig_sub_88
 
-            # 3. field-89 (請求/売上明細) の構築
+            # 3. field-89 (請求/売上明細) の構築（単一選択項目は書き戻さず元データを維持）
             orig_sub_89 = original_rec.get("field-89", [])
             sub89_list = []
             if source_tab == "flat":
@@ -517,16 +515,12 @@ if st.button("💾 チェックを入れたデータを データベース に�
                 if isinstance(orig_sub_89, list) and len(orig_sub_89) > 0:
                     item_89 = copy.deepcopy(orig_sub_89[0])
                     rec_dict_89 = item_89.get("record", {})
-                    rec_dict_89["field-89_11"] = clean_val(row_89["請求区分"])
+                    # ※ 単一選択（請求区分）はAPIに送らず元データを維持
                     
                     item_89["record"] = rec_dict_89
                     sub89_list.append(item_89)
                 else:
-                    sub89_list.append({
-                        "record": {
-                            "field-89_11": clean_val(first_row["請求区分"])
-                        }
-                    })
+                    sub89_list.append({"record": {}})
                 record_payload["field-89"] = sub89_list
             else:
                 record_payload["field-89"] = orig_sub_89
@@ -590,7 +584,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
             st.error(f"❌ {fail_count} 件の保存に失敗しました。")
 
 # ==========================================
-# タブ2：納品書発行
+# タブ2：納品書発行（Python側で納品区分を判別）
 # ==========================================
 with tab2:
     st.header("📦 納品書発行")
@@ -699,7 +693,7 @@ with tab2:
             st.download_button("📥 納品書HTMLファイルをダウンロード", data=html_content.encode("utf-8"), file_name=f"納品書_{field_2 if field_2 else 'd'}.html", mime="text/html")
 
 # ==========================================
-# タブ3：請求書発行
+# タブ3：請求書発行（Python側で請求区分を判別）
 # ==========================================
 with tab3:
     st.header("📄 請求書発行（口座指定可）")
@@ -737,7 +731,7 @@ with tab3:
         df_inv_preview = pd.DataFrame(invoice_rows)
         st.dataframe(df_inv_preview, use_container_width=True)
         
-        if st.button("🚀 請求書プレビュー / 印刷（PDF）を作成", type="primary", key="btn_pdf_invoice"):
+        if st.button("🚀 納品書・請求書プレビュー / 印刷（PDF）を作成", type="primary", key="btn_pdf_invoice"):
             try:
                 unit_price = float(field_5) if field_5 else 0
             except ValueError:
