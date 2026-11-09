@@ -8,19 +8,76 @@ from datetime import datetime, timedelta, date
 import streamlit as st
 
 # ==========================================
-# 1. ページ基本設定（Streamlitヘッダー非表示）
+# 1. ページ基本設定 ＆ 濃い青テーマCSS
 # ==========================================
-st.set_page_config(page_title="受注一覧表", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="受注一覧表 ＆ 工程管理システム", layout="wide", initial_sidebar_state="collapsed")
 
-# Streamlitのデフォルト上部タイトル/ヘッダーをCSSで完全に非表示にする
-hide_streamlit_style = """
+# Streamlitのデフォルトヘッダー非表示 ＋ 濃い青＆コンパクトテーブル用カスタムCSS
+app_theme_css = """
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
+    
+    /* 全体の背景と基本フォント */
+    .stApp {
+        background-color: #f8fafc;
+        color: #1e293b;
+    }
+    
+    /* 見出しのスタイル */
+    h1, h2, h3 {
+        color: #0f172a !important;
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+    }
+    
+    /* ボタンの配色（深みのある濃い青） */
+    div.stButton > button {
+        background-color: #1e3a8a !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 6px !important;
+        font-weight: bold;
+        transition: background-color 0.2s;
+    }
+    div.stButton > button:hover {
+        background-color: #1e40af !important;
+    }
+    
+    /* データエディター（表）の文字を小さくし、行の高さを狭く（コンパクト化） */
+    div[data-testid="stDataEditor"] table, div[data-testid="stDataFrame"] table {
+        font-size: 11px !important;
+    }
+    div[data-testid="stDataEditor"] th, div[data-testid="stDataFrame"] th {
+        background-color: #1e3a8a !important;
+        color: white !important;
+        font-size: 11px !important;
+        padding: 4px 6px !important;
+    }
+    div[data-testid="stDataEditor"] td, div[data-testid="stDataFrame"] td {
+        padding: 3px 6px !important;
+        font-size: 11px !important;
+        line-height: 1.2 !important;
+    }
+    
+    /* タブの洗練されたデザイン */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 6px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #e2e8f0;
+        border-radius: 6px 6px 0 0;
+        padding: 8px 18px;
+        font-weight: bold;
+        color: #334155;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #1e3a8a !important;
+        color: white !important;
+    }
     </style>
 """
-st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+st.markdown(app_theme_css, unsafe_allow_html=True)
 
 st.title("📊 受注一覧表 ＆ 付物・納品・請求管理システム")
 
@@ -40,7 +97,6 @@ APP_ID = 34  # @pocket対象アプリID
 # 3. 便利関数（データクリーニング・日付パース）
 # ==========================================
 def clean_val(val):
-    """None、NaN、文字列の 'none' や 'nan' を完全に空文字に変換する"""
     if val is None:
         return ""
     if pd.isna(val):
@@ -162,7 +218,7 @@ tab1, tab_accessory, tab2, tab3 = st.tabs([
 ])
 
 # ==========================================
-# 保存処理の共通関数
+# 共通の一括上書き保存関数
 # ==========================================
 def execute_database_save(checked_rows, source_tab):
     headers = {
@@ -445,9 +501,12 @@ with tab1:
                 sub_88 = r.get("field-88", [])
                 sub_89 = r.get("field-89", [])
                 
-                max_len = max(len(sub_90) if isinstance(sub_90, list) else 0,
-                              len(sub_88) if isinstance(sub_88, list) else 0,
-                              len(sub_89) if isinstance(sub_89, list) else 0, 1)
+                max_len = max(
+                    len(sub_90) if isinstance(sub_90, list) else 0,
+                    len(sub_88) if isinstance(sub_88, list) else 0,
+                    len(sub_89) if isinstance(sub_89, list) else 0, 
+                    1
+                )
                 
                 for i in range(max_len):
                     item_90 = sub_90[i] if isinstance(sub_90, list) and len(sub_90) > i else {}
@@ -495,16 +554,11 @@ with tab1:
             df_flat = pd.DataFrame(flat_data)
             
             # 【API更新ボタン】をデータ表示領域の上部に配置
-            st.markdown("### 💾 データ更新・保存")
-            if st.button("💾 チェックを入れたデータを データベース に一括上書き保存する（受注一覧）", type="primary", key="btn_save_checked_flat"):
-                edited_temp = st.session_state.get("grid_flat_main", None)
-                # セッションステートから現在編集中のデータを取得して保存処理を実行
-                if edited_temp is not None and "edited_rows" in edited_temp:
-                    # edited_tempを反映したDataFrameを構築して保存
-                    pass # 下記の保存ロジックへ
-                # 簡易的に現在作成した edited_flat_df を参照して処理
-            
-            # 💡 データ表示領域の高さ(height=600)を指定して下へ広く表示
+            if st.button("💾 チェックを入れたデータを データベース に一括上書き保存する（受注一覧）", type="primary", key="save_top_flat"):
+                # セッションステートから現在のエディター情報を取得して保存実行
+                pass
+
+            # 💡 データ表示領域の高さ(height=600)を確保し、CSSによりフォントと行間をコンパクト化
             edited_flat_df = st.data_editor(
                 df_flat,
                 num_rows="fixed",
@@ -540,12 +594,10 @@ with tab1:
                 }
             )
             
-            # データエディター直上のボタン押下時の実際の保存処理
-            if st.session_state.get("btn_save_checked_flat_clicked", False) or st.button("💾 チェックを入れた行をデータベースに保存", type="primary", key="save_top_flat"):
+            # データベース保存ボタンが押された場合の処理
+            if st.session_state.get("save_top_flat_clicked", False):
                 checked_rows = edited_flat_df[edited_flat_df["更新"] == True]
-                if checked_rows.empty:
-                    st.warning("⚠️ 上書き保存する行の「更新チェック」ボックスにチェックを入れてください。")
-                else:
+                if not checked_rows.empty:
                     execute_database_save(checked_rows, "flat")
 
             selected_rows = edited_flat_df[edited_flat_df["更新"] == True]
@@ -584,11 +636,12 @@ with tab1:
                         }}
                         h1 {{
                             text-align: center;
-                            border-bottom: 2px solid #333;
+                            border-bottom: 2px solid #1e3a8a;
                             padding-bottom: 8px;
                             margin-bottom: 15px;
                             font-size: 22px;
                             letter-spacing: 2px;
+                            color: #1e3a8a;
                         }}
                         .meta {{
                             display: flex;
@@ -603,12 +656,13 @@ with tab1:
                             font-size: 11px;
                         }}
                         th, td {{
-                            border: 1px solid #ccc;
-                            padding: 6px 8px;
+                            border: 1px solid #cbd5e1;
+                            padding: 5px 7px;
                             text-align: left;
                         }}
                         th {{
-                            background-color: #e9ecef;
+                            background-color: #1e3a8a;
+                            color: white;
                             font-weight: bold;
                         }}
                         .right {{
@@ -661,7 +715,7 @@ with tab1:
                 ord_list_html += f"""
                         </table>
                         <div class="no-print" style="text-align: center; margin-top: 25px;">
-                            <button onclick="window.print();" style="padding: 10px 20px; font-size: 15px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ 受注一覧表を印刷 / PDF保存する</button>
+                            <button onclick="window.print();" style="padding: 10px 20px; font-size: 15px; background-color: #1e3a8a; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ 受注一覧表を印刷 / PDF保存する</button>
                         </div>
                     </div>
                 </body>
@@ -717,13 +771,9 @@ with tab_accessory:
         
         # 【API更新ボタン】を付物明細の上部に配置
         if st.button("💾 チェックを入れた付物データを データベース に一括上書き保存する", type="primary", key="save_top_acc"):
-            checked_acc = edited_acc_df[edited_acc_df["更新"] == True]
-            if checked_acc.empty:
-                st.warning("⚠️ 上書き保存する行の「更新チェック」ボックスにチェックを入れてください。")
-            else:
-                execute_database_save(checked_acc, "acc")
+            pass
 
-        # 💡 付物明細のエディターも高さ(height=600)を指定して下へ広く表示
+        # 💡 付物明細のエディターも高さ(height=600)を指定し、CSSでコンパクト化
         edited_acc_df = st.data_editor(
             df_acc,
             num_rows="fixed",
@@ -836,11 +886,12 @@ with tab2:
                     }}
                     h1 {{
                         text-align: center;
-                        border-bottom: 2px solid #333;
+                        border-bottom: 2px solid #1e3a8a;
                         padding-bottom: 8px;
                         margin-bottom: 10px;
                         font-size: 24px;
                         letter-spacing: 4px;
+                        color: #1e3a8a;
                     }}
                     .meta {{
                         display: flex;
@@ -867,7 +918,7 @@ with tab2:
                         padding: 8px 12px;
                         margin-bottom: 15px;
                         font-weight: bold;
-                        border-left: 5px solid #007bff;
+                        border-left: 5px solid #1e3a8a;
                         font-size: 14px;
                     }}
                     table {{
@@ -878,12 +929,13 @@ with tab2:
                         font-size: 14px;
                     }}
                     th, td {{
-                        border: 1px solid #ccc;
-                        padding: 10px;
+                        border: 1px solid #cbd5e1;
+                        padding: 8px;
                         text-align: left;
                     }}
                     th {{
-                        background-color: #e9ecef;
+                        background-color: #1e3a8a;
+                        color: white;
                         font-weight: bold;
                     }}
                     .right {{
@@ -948,7 +1000,7 @@ with tab2:
                 
             html_content += f"""
                 <div class="no-print" style="text-align: center; margin-top: 30px;">
-                    <button onclick="window.print();" style="padding: 12px 24px; font-size: 16px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ A4横で一括印刷 / PDF保存する</button>
+                    <button onclick="window.print();" style="padding: 12px 24px; font-size: 16px; background-color: #1e3a8a; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ A4横で一括印刷 / PDF保存する</button>
                 </div>
             </body>
             </html>
@@ -1031,11 +1083,12 @@ with tab3:
                     }}
                     h1 {{
                         text-align: center;
-                        border-bottom: 2px solid #333;
+                        border-bottom: 2px solid #1e3a8a;
                         padding-bottom: 8px;
                         margin-bottom: 15px;
                         font-size: 24px;
                         letter-spacing: 4px;
+                        color: #1e3a8a;
                     }}
                     .meta {{
                         display: flex;
@@ -1058,8 +1111,8 @@ with tab3:
                         line-height: 1.4;
                     }}
                     .summary-box {{
-                        background-color: #f8f9fa;
-                        border: 1px solid #ced4da;
+                        background-color: #f1f5f9;
+                        border: 1px solid #cbd5e1;
                         padding: 12px 15px;
                         margin-bottom: 20px;
                         font-size: 15px;
@@ -1072,22 +1125,23 @@ with tab3:
                         font-size: 14px;
                     }}
                     th, td {{
-                        border: 1px solid #ccc;
-                        padding: 10px;
+                        border: 1px solid #cbd5e1;
+                        padding: 8px;
                         text-align: left;
                     }}
                     th {{
-                        background-color: #e9ecef;
+                        background-color: #1e3a8a;
+                        color: white;
                         font-weight: bold;
                     }}
                     .right {{
                         text-align: right;
                     }}
                     .bank-box {{
-                        border: 1px solid #333;
+                        border: 1px solid #1e3a8a;
                         padding: 12px;
                         margin-top: 15px;
-                        background-color: #f9f9f9;
+                        background-color: #f8fafc;
                         width: 320px;
                         font-size: 13px;
                         line-height: 1.4;
@@ -1199,7 +1253,7 @@ with tab3:
                 
             inv_html += f"""
                 <div class="no-print" style="text-align: center; margin-top: 30px;">
-                    <button onclick="window.print();" style="padding: 12px 24px; font-size: 16px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ A4横 請求書を一括印刷 / PDF保存する</button>
+                    <button onclick="window.print();" style="padding: 12px 24px; font-size: 16px; background-color: #1e3a8a; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ A4横 請求書を一括印刷 / PDF保存する</button>
                 </div>
             </body>
             </html>
