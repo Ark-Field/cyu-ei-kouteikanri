@@ -7,9 +7,20 @@ from datetime import datetime, timedelta, date
 import streamlit as st
 
 # ==========================================
-# 1. ページ基本設定
+# 1. ページ基本設定（Streamlitヘッダー非表示）
 # ==========================================
-st.set_page_config(page_title="受注一覧表", layout="wide")
+st.set_page_config(page_title="受注一覧表", layout="wide", initial_sidebar_state="collapsed")
+
+# Streamlitのデフォルト上部タイトル/ヘッダーをCSSで完全に非表示にする
+hide_streamlit_style = """
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    </style>
+"""
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
 st.title("📊 受注一覧表 ＆ 付物・納品・請求管理システム")
 
 # ==========================================
@@ -597,7 +608,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
             st.error(f"❌ {fail_count} 件の保存に失敗しました。")
 
 # ==========================================
-# タブ2：納品書発行（A4横・納品書番号10桁付与・顧客名拡大）
+# タブ2：納品書発行（A4横・納品元情報追加・保存ボタンなし）
 # ==========================================
 with tab2:
     st.header("📦 納品書発行")
@@ -607,7 +618,6 @@ with tab2:
         delivery_rows = []
         for _, row in edited_flat_df.iterrows():
             if row.get("納品", False):
-                # 受注番号から納品書番号を生成（受注番号 + 納品日のMMDD、なければ本日MMDD）
                 ord_no_raw = clean_val(row.get("受注番号", ""))
                 d_date_val = row.get("納品日", "")
                 
@@ -622,9 +632,8 @@ with tab2:
                 if not mmdd:
                     mmdd = datetime.now().strftime("%m%d")
                 
-                # 受注番号に4桁のMMDDを足して10桁（足りなければ0埋め調整）
                 base_ord = ord_no_raw if ord_no_raw else "000000"
-                delivery_no = (base_ord + mmdd)[-10:] # 末尾10桁に調整、あるいはスライス
+                delivery_no = (base_ord + mmdd)[-10:]
                 if len(delivery_no) < 10:
                     delivery_no = delivery_no.zfill(10)
 
@@ -663,7 +672,6 @@ with tab2:
             <head>
                 <meta charset="utf-8">
                 <style>
-                    /* A4横のページ設定 */
                     @page {{
                         size: A4 landscape;
                         margin: 15mm;
@@ -676,7 +684,7 @@ with tab2:
                         background: #fff;
                     }}
                     .invoice-page {{
-                        width: 267mm; /* A4横 (297mm) から余白を引いた幅 */
+                        width: 267mm;
                         min-height: 180mm;
                         page-break-after: always;
                         margin-bottom: 20px;
@@ -700,12 +708,17 @@ with tab2:
                         font-size: 14px;
                     }}
                     .customer-name {{
-                        font-size: 26px; /* 顧客名を大きく強調 */
+                        font-size: 26px;
                         font-weight: bold;
                         border-bottom: 2px solid #333;
                         padding-bottom: 4px;
                         display: inline-block;
                         margin-bottom: 5px;
+                    }}
+                    .supplier-info {{
+                        text-align: right;
+                        font-size: 13px;
+                        line-height: 1.4;
                     }}
                     .group-header {{
                         background-color: #f1f3f5;
@@ -753,8 +766,11 @@ with tab2:
                             <span class="customer-name">{pub_name if pub_name else '（出版社名未設定）'} 御中</span><br>
                             <p style="margin: 5px 0 0 0;"><strong>納品書番号:</strong> {deliv_no}</p>
                         </div>
-                        <div style="text-align: right;">
-                            <p><strong>発行日:</strong> {datetime.now().strftime('%Y-%m-%d')}</p>
+                        <div class="supplier-info">
+                            <strong>(株)中永製本所</strong><br>
+                            埼玉県さいたま市岩槻区真福寺1400<br>
+                            TEL 048-798-7377<br>
+                            <strong>発行日:</strong> {datetime.now().strftime('%Y-%m-%d')}
                         </div>
                     </div>
                     
@@ -795,9 +811,9 @@ with tab2:
             </body>
             </html>
             """
-            st.success("A4横対応・納品書番号付きの納品書が生成されました！")
-            st.components.v1.html(html_content, height=600, scrolling=True)
-            st.download_button("📥 納品書HTMLファイルをダウンロード", data=html_content.encode("utf-8"), file_name=f"納品書_A4横_{datetime.now().strftime('%Y%m%d')}.html", mime="text/html")
+            st.success("A4横対応・納品元情報付きの納品書が生成されました！")
+            st.components.v1.html(html_content, height=600, scrolling=True, key="preview_deliv_html")
+            st.download_button("📥 納品書HTMLファイルをダウンロード", data=html_content.encode("utf-8"), file_name=f"納品書_A4横_{datetime.now().strftime('%Y%m%d')}.html", mime="text/html", key="download_deliv_html")
 
 # ==========================================
 # タブ3：請求書発行
