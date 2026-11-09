@@ -536,7 +536,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     rec_dict_89 = item_89.get("record", {})
                     rec_dict_89["field-89_1"] = sale_date_str
                     rec_dict_89["field-89_3"] = clean_val(row_89["請求数量"]) or "0"
-                    rec_dict_89["field-89_4"] = clean_val(row_89["備考_請求"])
+                    rec_dict_89["field-89_7"] = clean_val(row_89["備考_請求"])
                     for k in ["field-89_5", "field-89_6"]:
                         rec_dict_89.pop(k, None)
                     item_89["record"] = rec_dict_89
@@ -546,7 +546,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
                         "record": {
                             "field-89_1": sale_date_str,
                             "field-89_3": clean_val(first_row["請求数量"]) or "0",
-                            "field-89_4": clean_val(first_row["備考_請求"])
+                            "field-89_7": clean_val(first_row["備考_請求"])
                         }
                     })
                 record_payload["field-89"] = sub89_list
