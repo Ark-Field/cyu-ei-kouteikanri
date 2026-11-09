@@ -103,9 +103,11 @@ def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, t
     return []
 
 def parse_date_safe(val):
-    if not val or str(val).lower() in ["nan", "none", ""]:
+    if not val or str(val).lower() in ["nan", "none", "", "nat"]:
         return None
     try:
+        if isinstance(val, (date, datetime)):
+            return val.date() if isinstance(val, datetime) else val
         return datetime.strptime(str(val)[:10].replace("/", "-"), "%Y-%m-%d").date()
     except ValueError:
         return None
@@ -237,14 +239,14 @@ with tab1:
                         "備考": str(rec_90.get("field-90_9", "")),
                         # 納品関連 (field-88)
                         "納品日": parse_date_safe(rec_88.get("field-88_2")),
-                        "納品数": str(rec_88.get("field-88_4", "")),
-                        "PL数": str(rec_88.get("field-88_7", "")),
-                        "見本数量": str(rec_88.get("field-88_8", "")),
-                        "配車区分": str(rec_88.get("field-88_10", "A便")),
+                        "納品数": str(rec_88.get("field-88_4", "")) if rec_88.get("field-88_4") is not None else "",
+                        "PL数": str(rec_88.get("field-88_7", "")) if rec_88.get("field-88_7") is not None else "",
+                        "見本数量": str(rec_88.get("field-88_8", "")) if rec_88.get("field-88_8") is not None else "",
+                        "配車区分": str(rec_88.get("field-88_10", "A便")) if rec_88.get("field-88_10") is not None else "A便",
                         "納品チェック": bool(rec_88.get("field-88_11", False)),
                         # 請求関連 (field-89)
                         "売上日": parse_date_safe(rec_89.get("field-89_1")),
-                        "請求数量": str(rec_89.get("field-89_3", "")),
+                        "請求数量": str(rec_89.get("field-89_3", "")) if rec_89.get("field-89_3") is not None else "",
                         "請求チェック": bool(rec_89.get("field-89_10", False))
                     })
             
@@ -457,36 +459,52 @@ if st.button("💾 チェックを入れたデータを データベース に�
             else:
                 record_payload["field-90"] = orig_sub_90
 
-            # 2. field-88 (納品明細) の構築
+            # 2. field-88 (納品明細) の構築（💡 日付や数値の形式エラーを防ぐ安全なクレンジング処理）
             orig_sub_88 = original_rec.get("field-88", [])
             sub88_list = []
             if source_tab == "flat":
                 row_88 = first_row
+                # 納品日のフォーマットチェック（NaTや不正な値を防ぐ）
+                deliv_date_val = row_88["納品日"]
+                deliv_date_str = ""
+                if pd.notna(deliv_date_val):
+                    if isinstance(deliv_date_val, (date, datetime)):
+                        deliv_date_str = deliv_date_val.strftime("%Y-%m-%d")
+                    else:
+                        parsed_d = parse_date_safe(deliv_date_val)
+                        if parsed_d:
+                            deliv_date_str = parsed_d.strftime("%Y-%m-%d")
+
                 if isinstance(orig_sub_88, list) and len(orig_sub_88) > 0:
                     item_88 = copy.deepcopy(orig_sub_88[0])
                     rec_dict_88 = item_88.get("record", {})
-                    rec_dict_88["field-88_2"] = str(row_88["納品日"]) if pd.notna(row_88["納品日"]) else ""
-                    rec_dict_88["field-88_4"] = str(row_88["納品数"]) if pd.notna(row_88["納品数"]) else ""
-                    rec_dict_88["field-88_7"] = str(row_88["PL数"]) if pd.notna(row_88["PL数"]) else ""
-                    rec_dict_88["field-88_8"] = str(row_88["見本数量"]) if pd.notna(row_88["見本数量"]) else ""
-                    rec_dict_88["field-88_10"] = str(row_88["配車区分"]) if pd.notna(row_88["配車区分"]) else ""
+                    rec_dict_88["field-88_2"] = deliv_date_str
+                    rec_dict_88["field-88_4"] = str(row_88["納品数"]) if pd.notna(row_88["納品数"]) else "0"
+                    rec_dict_88["field-88_7"] = str(row_88["PL数"]) if pd.notna(row_88["PL数"]) else "0"
+                    rec_dict_88["field-88_8"] = str(row_88["見本数量"]) if pd.notna(row_88["見本数量"]) else "0"
+                    rec_dict_88["field-88_10"] = str(row_88["配車区分"]) if pd.notna(row_88["配車区分"]) else "A便"
                     rec_dict_88["field-88_11"] = bool(row_88["納品チェック"])
                     item_88["record"] = rec_dict_88
                     sub88_list.append(item_88)
                 else:
                     sub88_list.append({
                         "record": {
-                            "field-88_2": str(first_row["納品日"]) if pd.notna(first_row["納品日"]) else "",
-                            "field-88_4": str(first_row["納品数"]) if pd.notna(first_row["納品数"]) else "",
-                            "field-88_7": str(first_row["PL数"]) if pd.notna(first_row["PL数"]) else "",
-                            "field-88_8": str(first_row["見本数量"]) if pd.notna(first_row["見本数量"]) else "",
-                            "field-88_10": str(first_row["配車区分"]) if pd.notna(first_row["配車区分"]) else "",
+                            "field-88_2": deliv_date_str,
+                            "field-88_4": str(first_row["納品数"]) if pd.notna(first_row["納品数"]) else "0",
+                            "field-88_7": str(first_row["PL数"]) if pd.notna(first_row["PL数"]) else "0",
+                            "field-88_8": str(first_row["見本数量"]) if pd.notna(first_row["見本数量"]) else "0",
+                            "field-88_10": str(first_row["配車区分"]) if pd.notna(first_row["配車区分"]) else "A便",
                             "field-88_11": bool(first_row["納品チェック"])
                         }
                     })
                 record_payload["field-88"] = sub88_list
             else:
-                record_payload["field-88"] = orig_sub_88
+                # タブ1以外で保存された場合も既存のfield-88を安全に引き継ぎ
+                cleaned_sub_88 = []
+                if isinstance(orig_sub_88, list):
+                    for sub_item in orig_sub_88:
+                        cleaned_sub_88.append(copy.deepcopy(sub_item))
+                record_payload["field-88"] = cleaned_sub_88
 
             # 3. field-89 (請求/売上明細) の構築
             orig_sub_89 = original_rec.get("field-89", [])
@@ -507,7 +525,11 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     })
                 record_payload["field-89"] = sub89_list
             else:
-                record_payload["field-89"] = orig_sub_89
+                cleaned_sub_89_sales = []
+                if isinstance(orig_sub_89, list):
+                    for sub_item in orig_sub_89:
+                        cleaned_sub_89_sales.append(copy.deepcopy(sub_item))
+                record_payload["field-89"] = cleaned_sub_89_sales
 
             # 4. field-91 (付物明細) の構築（※印刷所フィールドを除外し、日付のみ安全に渡す）
             orig_sub_91 = original_rec.get("field-91", [])
@@ -518,13 +540,11 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     item_91 = copy.deepcopy(orig_sub_91[0])
                     rec_dict_91 = item_91.get("record", {})
                     
-                    # 編集可能な日付項目のみ格納
                     rec_dict_91["field-91_1"] = str(row_91["表 日付"]) if pd.notna(row_91["表 日付"]) else ""
                     rec_dict_91["field-91_5"] = str(row_91["カバー 日付"]) if pd.notna(row_91["カバー 日付"]) else ""
                     rec_dict_91["field-91_9"] = str(row_91["カード 日付"]) if pd.notna(row_91["カード 日付"]) else ""
                     rec_dict_91["field-91_13"] = str(row_91["帯 日付"]) if pd.notna(row_91["帯 日付"]) else ""
                     
-                    # ❌ エラーの原因になる印刷所フィールドを完全に削除・除外
                     for k in ["field-91_2", "field-91_6", "field-91_10", "field-91_14", "Id", "recordSubId"]:
                         rec_dict_91.pop(k, None)
                         item_91.pop(k, None)
@@ -542,7 +562,6 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     })
                 record_payload["field-91"] = sub91_list
             else:
-                # タブ1保存時などは既存のfield-91から印刷所キーを除外してそのまま維持
                 cleaned_sub_91 = []
                 if isinstance(orig_sub_91, list):
                     for sub_item in orig_sub_91:
