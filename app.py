@@ -225,8 +225,8 @@ with tab1:
                 sub_89 = r.get("field-89", [])
                 
                 max_len = max(len(sub_90) if isinstance(sub_90, list) else 0,
-                              len(sub_88) if isinstance(sub_88, list) else 0,
-                              len(sub_89) if isinstance(sub_89, list) else 0, 1)
+                            len(sub_88) if isinstance(sub_88, list) else 0,
+                            len(sub_89) if isinstance(sub_89, list) else 0, 1)
                 
                 for i in range(max_len):
                     item_90 = sub_90[i] if isinstance(sub_90, list) and len(sub_90) > i else {}
@@ -267,7 +267,7 @@ with tab1:
                         # 請求関連 (field-89)
                         "売上日": parse_date_safe(rec_89.get("field-89_1")),
                         "請求数量": clean_val(rec_89.get("field-89_3", "")),
-                        "請求備考": clean_val(rec_89.get("field-89_7", "")),
+                        "備考_請求": clean_val(rec_89.get("field-89_7", "")),  # ← "備考_請求" に統一修正済み
                         "請求": False
                     })
             
@@ -984,7 +984,6 @@ with tab3:
             """
             
             for pub_name, items in grouped_invoice.items():
-                # 売上日の最小・最大から売上期間を算出
                 sale_dates = [parse_date_safe(i["売上日"]) for i in items if parse_date_safe(i["売上日"])]
                 if sale_dates:
                     min_d = min(sale_dates).strftime('%Y年%m月%d日')
@@ -993,7 +992,6 @@ with tab3:
                 else:
                     period_str = datetime.now().strftime('%Y年%m月度')
 
-                # 金額計算
                 subtotal = 0
                 for item in items:
                     q_str = clean_val(item["請求数量"])
