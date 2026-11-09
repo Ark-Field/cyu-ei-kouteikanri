@@ -106,7 +106,13 @@ def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, t
                     rec_body = {}
                 
                 merged_body = {**item, **rec_body}
-                merged_body["_recordId"] = item.get("Id", item.get("recordId", item.get("ResultId", rec_body.get("Id", ""))))
+                merged_body["_recordId"] = str(
+                    item.get("Id") or 
+                    item.get("recordId") or 
+                    rec_body.get("Id") or 
+                    rec_body.get("recordId") or 
+                    item.get("ResultId") or ""
+                ).strip()
                 parsed_records.append(merged_body)
             
             if target_order_no and parsed_records:
@@ -220,6 +226,10 @@ with tab1:
                 h_qty = clean_val(r.get("field-4", ""))
                 h_price = clean_val(r.get("field-5", ""))
                 
+                # ★ @pocket 詳細画面へのリンクURL生成
+                rec_id = clean_val(r.get("_recordId", ""))
+                detail_url = f"{POCKET_BASE_URL}/apps/{APP_ID}/records/{rec_id}/detail" if rec_id and rec_id.lower() != "none" else ""
+                
                 sub_90 = r.get("field-90", [])
                 sub_88 = r.get("field-88", [])
                 sub_89 = r.get("field-89", [])
@@ -243,6 +253,7 @@ with tab1:
                     flat_data.append({
                         "更新": False,
                         "_record_idx": record_idx,
+                        "詳細": detail_url,  # ★ 詳細リンク列
                         "受注番号": h_ord_no,
                         "受注日": h_ord_date,
                         "出版社名": h_pub,
@@ -267,7 +278,7 @@ with tab1:
                         # 請求関連 (field-89)
                         "売上日": parse_date_safe(rec_89.get("field-89_1")),
                         "請求数量": clean_val(rec_89.get("field-89_3", "")),
-                        "備考_請求": clean_val(rec_89.get("field-89_7", "")),  # ← "備考_請求" に統一修正済み
+                        "備考_請求": clean_val(rec_89.get("field-89_7", "")),
                         "請求": False
                     })
             
@@ -281,6 +292,11 @@ with tab1:
                 column_config={
                     "更新": st.column_config.CheckboxColumn("更新チェック", required=True, help="チェックを入れた行のデータを@pocketに上書き保存します"),
                     "_record_idx": None,
+                    "詳細": st.column_config.LinkColumn(
+                        "🔗 @pocket詳細",
+                        help="@pocketの該当データ画面へジャンプします",
+                        display_text="📝 詳細を開く"
+                    ),
                     "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
                     "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD", disabled=True),
                     "出版社名": st.column_config.TextColumn("出版社名", disabled=True),
