@@ -1,6 +1,7 @@
 import io
 import os
 import json
+import base64
 import requests
 import pandas as pd
 from datetime import datetime, timedelta, date
@@ -812,7 +813,10 @@ with tab2:
             </html>
             """
             st.success("A4横対応・納品元情報付きの納品書が生成されました！")
-            st.components.v1.html(html_content, height=600, scrolling=True, key="preview_deliv_html")
+            
+            # Base64エンコードしてiframeで安定表示（TypeErrorを完全に防止）
+            b64_html = base64.b64encode(html_content.encode("utf-8")).decode("utf-8")
+            st.components.v1.iframe(f"data:text/html;base64,{b64_html}", height=600, scrolling=True)
 
 # ==========================================
 # タブ3：請求書発行
@@ -938,11 +942,7 @@ with tab3:
             </html>
             """
             st.success("請求書が生成されました！")
-            st.components.v1.html(inv_html, height=600, scrolling=True, key="preview_invoice_html")
-            st.download_button(
-                "📥 請求書HTMLファイルをダウンロード",
-                data=html_content.encode("utf-8"),
-                file_name=f"請求書_{datetime.now().strftime('%Y%m%d')}.html",
-                mime="text/html",
-                key="download_invoice_html"
-            )
+            
+            # 請求書側も同様にiframe表示にして安定化
+            b64_inv_html = base64.b64encode(inv_html.encode("utf-8")).decode("utf-8")
+            st.components.v1.iframe(f"data:text/html;base64,{b64_inv_html}", height=600, scrolling=True)
