@@ -13,7 +13,7 @@ from reportlab.lib.pagesizes import A4, landscape, portrait
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle, PageBreak
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 
 # ==========================================
@@ -179,7 +179,7 @@ def generate_accessory_pdf(df):
     buffer.seek(0)
     return buffer
 
-# --- 納品書PDF生成（A4横） ---
+# --- 納品書PDF生成（1ページ1件で改ページ・A4横） ---
 def generate_delivery_pdf(grouped_deliv_dict):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=25, rightMargin=25, topMargin=25, bottomMargin=25)
@@ -194,8 +194,9 @@ def generate_delivery_pdf(grouped_deliv_dict):
     elements = []
     
     for idx, ((d_date, car_div, pub_name, deliv_no), items) in enumerate(grouped_deliv_dict.items()):
+        # 2件目以降は必ず改ページする
         if idx > 0:
-            elements.append(Spacer(1, 20))
+            elements.append(PageBreak())
             
         elements.append(Paragraph("<b>納 品 書</b>", title_style))
         elements.append(Spacer(1, 10))
@@ -250,7 +251,7 @@ def generate_delivery_pdf(grouped_deliv_dict):
     buffer.seek(0)
     return buffer
 
-# --- 請求書PDF生成（A4縦） ---
+# --- 請求書PDF生成（1ページ1件で改ページ・A4縦） ---
 def generate_invoice_pdf(grouped_invoice_dict, bank_info):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=portrait(A4), leftMargin=25, rightMargin=25, topMargin=25, bottomMargin=25)
@@ -265,8 +266,9 @@ def generate_invoice_pdf(grouped_invoice_dict, bank_info):
     elements = []
     
     for idx, (pub_name, items) in enumerate(grouped_invoice_dict.items()):
+        # 2件目以降は必ず改ページする
         if idx > 0:
-            elements.append(Spacer(1, 20))
+            elements.append(PageBreak())
             
         sale_dates = [parse_date_safe(i["売上日"]) for i in items if parse_date_safe(i["売上日"])]
         if sale_dates:
