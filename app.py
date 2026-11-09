@@ -454,7 +454,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
             else:
                 record_payload["field-90"] = orig_sub_90
 
-            # 2. field-88 (納品明細) の構築（💡 納品チェックを必ず 1 または 0 に明示変換）
+            # 2. field-88 (納品明細) の構築（💡 recordSubIdなどの識別子を保持しつつ、納品チェックを更新）
             orig_sub_88 = original_rec.get("field-88", [])
             sub88_list = []
             if source_tab == "flat":
@@ -480,11 +480,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     rec_dict_88["field-88_8"] = str(row_88["見本数量"]) if pd.notna(row_88["見本数量"]) else "0"
                     rec_dict_88["field-88_11"] = is_deliv_checked
                     
-                    # 不要なキーを完全に削除
-                    for k in list(rec_dict_88.keys()):
-                        if k not in ["field-88_2", "field-88_4", "field-88_7", "field-88_8", "field-88_11"]:
-                            rec_dict_88.pop(k, None)
-                            
+                    # ⚠️ recordSubIdやIdは削除せずそのまま残す（行の識別のため必須）
                     item_88["record"] = rec_dict_88
                     sub88_list.append(item_88)
                 else:
@@ -499,20 +495,9 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     })
                 record_payload["field-88"] = sub88_list
             else:
-                cleaned_sub_88 = []
-                if isinstance(orig_sub_88, list):
-                    for sub_item in orig_sub_88:
-                        sub_item_copy = copy.deepcopy(sub_item)
-                        if isinstance(sub_item_copy, dict):
-                            rec_sub = sub_item_copy.get("record", sub_item_copy)
-                            if isinstance(rec_sub, dict):
-                                for k in list(rec_sub.keys()):
-                                    if k not in ["field-88_2", "field-88_4", "field-88_7", "field-88_8", "field-88_11"]:
-                                        rec_sub.pop(k, None)
-                        cleaned_sub_88.append(sub_item_copy)
-                record_payload["field-88"] = cleaned_sub_88
+                record_payload["field-88"] = orig_sub_88
 
-            # 3. field-89 (請求/売上明細) の構築（💡 請求チェックを必ず 1 または 0 に明示変換）
+            # 3. field-89 (請求/売上明細) の構築（💡 recordSubIdなどの識別子を保持しつつ、請求チェックを更新）
             orig_sub_89 = original_rec.get("field-89", [])
             sub89_list = []
             if source_tab == "flat":
@@ -524,11 +509,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     rec_dict_89 = item_89.get("record", {})
                     rec_dict_89["field-89_10"] = is_inv_checked
                     
-                    # 不要なキーを完全に削除
-                    for k in list(rec_dict_89.keys()):
-                        if k not in ["field-89_1", "field-89_3", "field-89_10"]:
-                            rec_dict_89.pop(k, None)
-                            
+                    # ⚠️ recordSubIdやIdは削除せずそのまま残す
                     item_89["record"] = rec_dict_89
                     sub89_list.append(item_89)
                 else:
@@ -539,18 +520,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     })
                 record_payload["field-89"] = sub89_list
             else:
-                cleaned_sub_89_sales = []
-                if isinstance(orig_sub_89, list):
-                    for sub_item in orig_sub_89:
-                        sub_item_copy = copy.deepcopy(sub_item)
-                        if isinstance(sub_item_copy, dict):
-                            rec_sub = sub_item_copy.get("record", sub_item_copy)
-                            if isinstance(rec_sub, dict):
-                                for k in list(rec_sub.keys()):
-                                    if k not in ["field-89_1", "field-89_3", "field-89_10"]:
-                                        rec_sub.pop(k, None)
-                        cleaned_sub_89_sales.append(sub_item_copy)
-                record_payload["field-89"] = cleaned_sub_89_sales
+                record_payload["field-89"] = orig_sub_89
 
             # 4. field-91 (付物明細) の構築
             orig_sub_91 = original_rec.get("field-91", [])
@@ -566,10 +536,6 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     rec_dict_91["field-91_9"] = str(row_91["カード 日付"]) if pd.notna(row_91["カード 日付"]) else ""
                     rec_dict_91["field-91_13"] = str(row_91["帯 日付"]) if pd.notna(row_91["帯 日付"]) else ""
                     
-                    for k in ["field-91_2", "field-91_6", "field-91_10", "field-91_14", "Id", "recordSubId"]:
-                        rec_dict_91.pop(k, None)
-                        item_91.pop(k, None)
-                        
                     item_91["record"] = rec_dict_91
                     sub91_list.append(item_91)
                 else:
@@ -583,17 +549,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     })
                 record_payload["field-91"] = sub91_list
             else:
-                cleaned_sub_91 = []
-                if isinstance(orig_sub_91, list):
-                    for sub_item in orig_sub_91:
-                        sub_item_copy = copy.deepcopy(sub_item)
-                        if isinstance(sub_item_copy, dict):
-                            rec_sub = sub_item_copy.get("record", sub_item_copy)
-                            if isinstance(rec_sub, dict):
-                                for k in ["field-91_2", "field-91_6", "field-91_10", "field-91_14"]:
-                                    rec_sub.pop(k, None)
-                        cleaned_sub_91.append(sub_item_copy)
-                record_payload["field-91"] = cleaned_sub_91
+                record_payload["field-91"] = orig_sub_91
 
             payload = {
                 "apiVersion": 1.1,
