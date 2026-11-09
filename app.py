@@ -124,7 +124,6 @@ def generate_order_pdf(df):
         Spacer(1, 10),
     ]
 
-    # 出力対象カラムの選定（不要な内部列を除外）
     exclude_cols = ["更新", "_record_idx", "詳細"]
     target_cols = [c for c in df.columns if c not in exclude_cols]
 
@@ -132,7 +131,6 @@ def generate_order_pdf(df):
     for _, row in df.iterrows():
         table_data.append([Paragraph(str(row[c]) if pd.notna(row[c]) else "", cell_style) for c in target_cols])
 
-    # ページ幅(842 - 30 = 812)に合わせて列幅を均等配分
     col_w = 812 / len(target_cols)
     col_widths = [col_w] * len(target_cols)
 
@@ -461,7 +459,6 @@ with tab1:
                 }
             )
             
-            # --- 受注一覧表のダウンロードボタン ---
             st.markdown("---")
             col_dl1, col_dl2 = st.columns(2)
             with col_dl1:
@@ -568,7 +565,6 @@ with tab_accessory:
             }
         )
 
-        # --- 付物明細一覧表のダウンロードボタン ---
         st.markdown("---")
         col_dl3, col_dl4 = st.columns(2)
         with col_dl3:
@@ -643,7 +639,6 @@ if st.button("💾 チェックを入れたデータを データベース に�
                 "field-5": clean_val(original_rec.get("field-5", "")),
             }
             
-            # 1. field-90 (工程日) の構築
             orig_sub_90 = original_rec.get("field-90", [])
             sub90_list = []
             if source_tab == "flat":
@@ -675,7 +670,6 @@ if st.button("💾 チェックを入れたデータを データベース に�
             else:
                 record_payload["field-90"] = orig_sub_90
 
-            # 2. field-88 (納品明細) の構築
             orig_sub_88 = original_rec.get("field-88", [])
             sub88_list = []
             if source_tab == "flat":
@@ -715,7 +709,6 @@ if st.button("💾 チェックを入れたデータを データベース に�
             else:
                 record_payload["field-88"] = orig_sub_88
 
-            # 3. field-89 (請求/売上明細) の構築
             orig_sub_89 = original_rec.get("field-89", [])
             sub89_list = []
             if source_tab == "flat":
@@ -760,7 +753,6 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     cleaned_sub89.append(item_cp)
                 record_payload["field-89"] = cleaned_sub89
 
-            # 4. field-91 (付物明細) の構築
             orig_sub_91 = original_rec.get("field-91", [])
             sub91_list = []
             if source_tab == "acc":
@@ -893,10 +885,11 @@ with tab2:
             <html>
             <head>
                 <meta charset="utf-8">
+                <title></title> <!-- ★ 上部タイトル非表示用 -->
                 <style>
                     @page {{
                         size: A4 landscape;
-                        margin: 15mm;
+                        margin: 10mm;
                     }}
                     body {{
                         font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -1088,10 +1081,11 @@ with tab3:
             <html>
             <head>
                 <meta charset="utf-8">
+                <title></title> <!-- ★ 上部タイトル非表示用 -->
                 <style>
                     @page {{
                         size: A4 portrait;
-                        margin: 15mm;
+                        margin: 10mm;
                     }}
                     body {{
                         font-family: 'Helvetica Neue', Arial, sans-serif;
@@ -1140,7 +1134,7 @@ with tab3:
                     .summary-box {{
                         background-color: #f8f9fa;
                         border: 1px solid #ced4da;
-                        padding: 12px 15px;
+                        padding: 12px 15mm;
                         margin-bottom: 20px;
                         font-size: 15px;
                     }}
