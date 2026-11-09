@@ -813,4 +813,143 @@ with tab2:
             """
             st.success("A4横対応・納品元情報付きの納品書が生成されました！")
             st.components.v1.html(html_content, height=600, scrolling=True, key="preview_deliv_html")
-            st.download_button("📥 納品書HTMLファイルをダウンロード", data=html_content.encode("utf-8"), file
+            st.download_button(
+                "📥 納品書HTMLファイルをダウンロード",
+                data=html_content.encode("utf-8"),
+                file_name=f"納品書_A4横_{datetime.now().strftime('%Y%m%d')}.html",
+                mime="text/html",
+                key="download_deliv_html"
+            )
+
+# ==========================================
+# タブ3：請求書発行
+# ==========================================
+with tab3:
+    st.header("📄 請求書発行（口座指定可）")
+    st.info("💡 タブ1の明細行で**「請求」**のチェックボックスにチェックが入っているデータから請求書を作成します。")
+    
+    bc1, bc2, bc3 = st.columns(3)
+    with bc1:
+        bank_name = st.text_input("銀行名", value="三井住友銀行", key="b_name")
+        bank_branch = st.text_input("支店名", value="岩槻支店", key="b_branch")
+    with bc2:
+        bank_type = st.selectbox("口座種別", options=["普通", "当座"], key="b_type")
+        bank_account = st.text_input("口座番号", value="1234567", key="b_acc")
+    with bc3:
+        bank_holder = st.text_input("口座名義", value="カ）チュウエイセイホンジョ", key="b_holder")
+
+    if 'edited_flat_df' in locals() and edited_flat_df is not None:
+        invoice_rows = []
+        for _, row in edited_flat_df.iterrows():
+            if row.get("請求", False):
+                invoice_rows.append({
+                    "出版社名": clean_val(row.get("出版社名", "")),
+                    "書名": clean_val(row.get("書名", "")),
+                    "売上日": row.get("売上日"),
+                    "請求数量": clean_val(row.get("請求数量", "0")),
+                    "単価": clean_val(row.get("単価", "0"))
+                })
+    else:
+        invoice_rows = []
+    
+    if not invoice_rows:
+        st.warning("⚠️ 「請求」にチェックが入っている明細がありません。\nタブ1の明細一覧で「請求」チェックを入れてください。")
+    else:
+        st.success(f"✨ 請求対象の明細が **{len(invoice_rows)} 件** 選択されています。")
+        
+        df_inv_preview = pd.DataFrame(invoice_rows)
+        st.dataframe(df_inv_preview, use_container_width=True)
+        
+        if st.button("🚀 請求書プレビュー / 印刷（PDF）を作成", type="primary", key="btn_pdf_invoice"):
+            inv_html = f"""
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <style>
+                    body {{ font-family: 'Helvetica Neue', Arial, sans-serif; padding: 30px; color: #333; }}
+                    h1 {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; }}
+                    .meta {{ display: flex; justify-content: space-between; margin-bottom: 20px; }}
+                    table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+                    th, td {{ border: 1px solid #ddd; padding: 10px; text-align: left; }}
+                    th {{ background-color: #f2f2f2; }}
+                    .right {{ text-align: right; }}
+                    .box {{ border: 1px solid #333; padding: 15px; margin-top: 20px; background-color: #f9f9f9; width: 350px; }}
+                    @media print {{
+                        body {{ padding: 0; }}
+                        .no-print {{ display: none; }}
+                    }}
+                </style>
+            </head>
+            <body>
+                <h1>請 求 書</h1>
+                <div class="meta">
+                    <div>
+                        <p><strong>宛先:</strong> 御中</p>
+                        <p><strong>発行日:</strong> {datetime.now().strftime('%Y-%m-%d')}</p>
+                    </div>
+                </div>
+                
+                <table>
+                    <tr>
+                        <th>出版社名</th>
+                        <th>書名</th>
+                        <th>売上日</th>
+                        <th class="right">請求数量</th>
+                        <th class="right">単価</th>
+                        <th class="right">金額</th>
+                    </tr>
+            """
+            grand_total = 0
+            for row in invoice_rows:
+                pub = row["出版社名"]
+                title = row["書名"]
+                s_date = clean_val(row["売上日"])
+                q_str = clean_val(row["請求数量"])
+                p_str = clean_val(row["単価"])
+                
+                q_num = int(q_str) if q_str.isdigit() else 0
+                try:
+                    p_num = float(p_str) if p_str else 0.0
+                except ValueError:
+                    p_num = 0.0
+                    
+                sub_total = q_num * p_num
+                grand_total += sub_total
+                
+                inv_html += f"""
+                    <tr>
+                        <td>{pub}</td>
+                        <td>{title}</td>
+                        <td>{s_date}</td>
+                        <td class="right">{q_num} 部</td>
+                        <td class="right">¥{p_num:,.2f}</td>
+                        <td class="right">¥{sub_total:,.2f}</td>
+                    </tr>
+                """
+            inv_html += f"""
+                </table>
+                
+                <h2 style="text-align: right; margin-top: 20px;">ご請求金額合計: ￥{grand_total:,.2f} (税込)</h2>
+                
+                <div class="box">
+                    <b>【お振込先口座】</b><br>
+                    {bank_name} {bank_branch} ({bank_type}) {bank_account}<br>
+                    口座名義: {bank_holder}
+                </div>
+                
+                <br>
+                <div class="no-print" style="text-align: center; margin-top: 20px;">
+                    <button onclick="window.print();" style="padding: 10px 20px; font-size: 16px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ この請求書を印刷 / PDF保存する</button>
+                </div>
+            </body>
+            </html>
+            """
+            st.success("請求書が生成されました！")
+            st.components.v1.html(inv_html, height=600, scrolling=True, key="preview_invoice_html")
+            st.download_button(
+                "📥 請求書HTMLファイルをダウンロード",
+                data=inv_html.encode("utf-8"),
+                file_name=f"請求書_{datetime.now().strftime('%Y%m%d')}.html",
+                mime="text/html",
+                key="download_invoice_html"
+            )
