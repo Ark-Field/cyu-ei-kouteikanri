@@ -423,7 +423,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
                 "field-5": str(original_rec.get("field-5", "")),
             }
             
-            # 1. field-90 の構築
+            # 1. field-90 (工程日) の構築
             orig_sub_90 = original_rec.get("field-90", [])
             sub90_list = []
             if source_tab == "flat":
@@ -509,7 +509,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
             else:
                 record_payload["field-89"] = orig_sub_89
 
-            # 4. field-91 (付物明細) の構築
+            # 4. field-91 (付物明細) の構築（※印刷所フィールドを除外し、日付のみ安全に渡す）
             orig_sub_91 = original_rec.get("field-91", [])
             sub91_list = []
             if source_tab == "acc":
@@ -518,13 +518,16 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     item_91 = copy.deepcopy(orig_sub_91[0])
                     rec_dict_91 = item_91.get("record", {})
                     
+                    # 編集可能な日付項目のみ格納
                     rec_dict_91["field-91_1"] = str(row_91["表 日付"]) if pd.notna(row_91["表 日付"]) else ""
                     rec_dict_91["field-91_5"] = str(row_91["カバー 日付"]) if pd.notna(row_91["カバー 日付"]) else ""
                     rec_dict_91["field-91_9"] = str(row_91["カード 日付"]) if pd.notna(row_91["カード 日付"]) else ""
                     rec_dict_91["field-91_13"] = str(row_91["帯 日付"]) if pd.notna(row_91["帯 日付"]) else ""
                     
-                    for k in ["field-91_2", "field-91_6", "field-91_10", "field-91_14"]:
+                    # ❌ エラーの原因になる印刷所フィールドを完全に削除・除外
+                    for k in ["field-91_2", "field-91_6", "field-91_10", "field-91_14", "Id", "recordSubId"]:
                         rec_dict_91.pop(k, None)
+                        item_91.pop(k, None)
                         
                     item_91["record"] = rec_dict_91
                     sub91_list.append(item_91)
@@ -539,7 +542,18 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     })
                 record_payload["field-91"] = sub91_list
             else:
-                record_payload["field-91"] = orig_sub_91
+                # タブ1保存時などは既存のfield-91から印刷所キーを除外してそのまま維持
+                cleaned_sub_91 = []
+                if isinstance(orig_sub_91, list):
+                    for sub_item in orig_sub_91:
+                        sub_item_copy = copy.deepcopy(sub_item)
+                        if isinstance(sub_item_copy, dict):
+                            rec_sub = sub_item_copy.get("record", sub_item_copy)
+                            if isinstance(rec_sub, dict):
+                                for k in ["field-91_2", "field-91_6", "field-91_10", "field-91_14"]:
+                                    rec_sub.pop(k, None)
+                        cleaned_sub_91.append(sub_item_copy)
+                record_payload["field-91"] = cleaned_sub_91
 
             payload = {
                 "apiVersion": 1.1,
