@@ -9,7 +9,7 @@ import streamlit as st
 
 # ReportLab関連のインポート（PDF出力用）
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import A4, landscape, portrait
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
@@ -104,14 +104,7 @@ def to_excel_bytes(df):
 # --- 受注一覧表のPDF生成 ---
 def generate_order_pdf(df):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=landscape(A4),
-        leftMargin=15,
-        rightMargin=15,
-        topMargin=15,
-        bottomMargin=15,
-    )
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=15, rightMargin=15, topMargin=15, bottomMargin=15)
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=14, leading=16, textColor=colors.HexColor("#1E3A8A"))
     header_style = ParagraphStyle("Header", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7.5, leading=9, textColor=colors.white, alignment=1)
@@ -132,17 +125,13 @@ def generate_order_pdf(df):
         table_data.append([Paragraph(str(row[c]) if pd.notna(row[c]) else "", cell_style) for c in target_cols])
 
     col_w = 812 / len(target_cols)
-    col_widths = [col_w] * len(target_cols)
-
-    t = Table(table_data, colWidths=col_widths, repeatRows=1)
+    t = Table(table_data, colWidths=[col_w] * len(target_cols), repeatRows=1)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
         ("ALIGN", (0, 0), (-1, -1), "LEFT"),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
         ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("LEFTPADDING", (0, 0), (-1, -1), 3),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
         ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
     ]))
 
@@ -154,14 +143,7 @@ def generate_order_pdf(df):
 # --- 付物明細一覧表のPDF生成 ---
 def generate_accessory_pdf(df):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=landscape(A4),
-        leftMargin=20,
-        rightMargin=20,
-        topMargin=20,
-        bottomMargin=20,
-    )
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=14, leading=16, textColor=colors.HexColor("#1E3A8A"))
     header_style = ParagraphStyle("Header", parent=styles["Normal"], fontName=FONT_NAME, fontSize=8, leading=10, textColor=colors.white, alignment=1)
@@ -182,21 +164,214 @@ def generate_accessory_pdf(df):
         table_data.append([Paragraph(str(row[c]) if pd.notna(row[c]) else "", cell_style) for c in target_cols])
 
     col_w = 772 / len(target_cols)
-    col_widths = [col_w] * len(target_cols)
-
-    t = Table(table_data, colWidths=col_widths, repeatRows=1)
+    t = Table(table_data, colWidths=[col_w] * len(target_cols), repeatRows=1)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
         ("ALIGN", (0, 0), (-1, -1), "LEFT"),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("LEFTPADDING", (0, 0), (-1, -1), 3),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
         ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
     ]))
 
     elements.append(t)
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+# --- 納品書PDF生成（A4横） ---
+def generate_delivery_pdf(grouped_deliv_dict):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=25, rightMargin=25, topMargin=25, bottomMargin=25)
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=20, leading=22, alignment=1, textColor=colors.HexColor("#1E3A8A"))
+    h_style = ParagraphStyle("H", parent=styles["Normal"], fontName=FONT_NAME, fontSize=10, leading=14, textColor=colors.HexColor("#333333"))
+    th_style = ParagraphStyle("TH", parent=styles["Normal"], fontName=FONT_NAME, fontSize=9, leading=11, textColor=colors.white, alignment=1)
+    td_style = ParagraphStyle("TD", parent=styles["Normal"], fontName=FONT_NAME, fontSize=9, leading=12, textColor=colors.HexColor("#1E293B"))
+    td_right = ParagraphStyle("TDR", parent=td_style, alignment=2)
+
+    elements = []
+    
+    for idx, ((d_date, car_div, pub_name, deliv_no), items) in enumerate(grouped_deliv_dict.items()):
+        if idx > 0:
+            elements.append(Spacer(1, 20))
+            
+        elements.append(Paragraph("<b>納 品 書</b>", title_style))
+        elements.append(Spacer(1, 10))
+        
+        meta_data = [
+            [
+                Paragraph(f"<b>{pub_name if pub_name else '（出版社名未設定）'} 御中</b>", ParagraphStyle("CName", parent=h_style, fontSize=14, leading=16)),
+                Paragraph("<b>(株)中永製本所</b><br/>埼玉県さいたま市岩槻区真福寺1400<br/>TEL 048-798-7377", ParagraphStyle("SInfo", parent=h_style, alignment=2))
+            ],
+            [
+                Paragraph(f"納品書番号: {deliv_no}<br/>納品日: {d_date if d_date else '（未設定）'}<br/>配車区分: {car_div if car_div else '（未設定）'}", h_style),
+                Paragraph(f"発行日: {date.today().strftime('%Y年%m月%d日')}", ParagraphStyle("DateInfo", parent=h_style, alignment=2))
+            ]
+        ]
+        meta_table = Table(meta_data, colWidths=[400, 372])
+        meta_table.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP"), ("BOTTOMPADDING", (0,0), (-1,-1), 6)]))
+        elements.append(meta_table)
+        elements.append(Spacer(1, 10))
+        
+        elements.append(Paragraph("下記のとおり納品いたしました。", h_style))
+        elements.append(Spacer(1, 6))
+        
+        table_data = [[
+            Paragraph("書名 （製本数）", th_style),
+            Paragraph("数量", th_style),
+            Paragraph("PL数", th_style),
+            Paragraph("見本数", th_style),
+            Paragraph("備考", th_style)
+        ]]
+        
+        for item in items:
+            title_display = f"{item['書名']} （{item['製本数']}部）" if item['書名'] else '（書名なし）'
+            table_data.append([
+                Paragraph(title_display, td_style),
+                Paragraph(f"{item['数量']} 部", td_right),
+                Paragraph(f"{item['PL数']} PL", td_right),
+                Paragraph(f"{item['見本数']} 部", td_right),
+                Paragraph(item['備考'], td_style)
+            ])
+            
+        d_table = Table(table_data, colWidths=[312, 100, 80, 80, 200])
+        d_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
+        ]))
+        elements.append(d_table)
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+# --- 請求書PDF生成（A4縦） ---
+def generate_invoice_pdf(grouped_invoice_dict, bank_info):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=portrait(A4), leftMargin=25, rightMargin=25, topMargin=25, bottomMargin=25)
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=20, leading=22, alignment=1, textColor=colors.HexColor("#1E3A8A"))
+    h_style = ParagraphStyle("H", parent=styles["Normal"], fontName=FONT_NAME, fontSize=10, leading=14, textColor=colors.HexColor("#333333"))
+    th_style = ParagraphStyle("TH", parent=styles["Normal"], fontName=FONT_NAME, fontSize=9, leading=11, textColor=colors.white, alignment=1)
+    td_style = ParagraphStyle("TD", parent=styles["Normal"], fontName=FONT_NAME, fontSize=9, leading=12, textColor=colors.HexColor("#1E293B"))
+    td_right = ParagraphStyle("TDR", parent=td_style, alignment=2)
+
+    elements = []
+    
+    for idx, (pub_name, items) in enumerate(grouped_invoice_dict.items()):
+        if idx > 0:
+            elements.append(Spacer(1, 20))
+            
+        sale_dates = [parse_date_safe(i["売上日"]) for i in items if parse_date_safe(i["売上日"])]
+        if sale_dates:
+            min_d = min(sale_dates).strftime('%Y年%m月%d日')
+            max_d = max(sale_dates).strftime('%Y年%m月%d日')
+            period_str = f"{min_d} ～ {max_d}" if min_d != max_d else min_d
+        else:
+            period_str = datetime.now().strftime('%Y年%m月度')
+
+        subtotal = 0
+        for item in items:
+            q_str = clean_val(item["請求数量"])
+            p_str = clean_val(item["単価"])
+            q_num = int(q_str) if q_str.isdigit() else 0
+            try:
+                p_num = float(p_str) if p_str else 0.0
+            except ValueError:
+                p_num = 0.0
+            subtotal += q_num * p_num
+        
+        tax_amount = round(subtotal * 0.10)
+        grand_total = subtotal + tax_amount
+
+        elements.append(Paragraph("<b>請 求 書</b>", title_style))
+        elements.append(Spacer(1, 10))
+        
+        meta_data = [
+            [
+                Paragraph(f"<b>{pub_name if pub_name else '（出版社名未設定）'} 御中</b>", ParagraphStyle("CName", parent=h_style, fontSize=14, leading=16)),
+                Paragraph("<b>(株)中永製本所</b><br/>埼玉県さいたま市岩槻区真福寺1400<br/>TEL 048-798-7377", ParagraphStyle("SInfo", parent=h_style, alignment=2))
+            ],
+            [
+                Paragraph("下記のとおりご請求申し上げます。", h_style),
+                Paragraph(f"発行日: {date.today().strftime('%Y年%m月%d日')}", ParagraphStyle("DateInfo", parent=h_style, alignment=2))
+            ]
+        ]
+        meta_table = Table(meta_data, colWidths=[300, 245])
+        meta_table.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP"), ("BOTTOMPADDING", (0,0), (-1,-1), 6)]))
+        elements.append(meta_table)
+        elements.append(Spacer(1, 8))
+        
+        summary_text = f"<b>売上期間:</b> {period_str}<br/><b>ご請求金額合計（税込）: ￥{grand_total:,.0f}</b> （うち消費税額等: ￥{tax_amount:,.0f}）"
+        summary_table = Table([[Paragraph(summary_text, h_style)]], colWidths=[545])
+        summary_table.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#F8F9FA")),
+            ("BOX", (0,0), (-1,-1), 1, colors.HexColor("#CED4DA")),
+            ("TOPPADDING", (0,0), (-1,-1), 8),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 8),
+            ("LEFTPADDING", (0,0), (-1,-1), 10),
+            ("RIGHTPADDING", (0,0), (-1,-1), 10),
+        ]))
+        elements.append(summary_table)
+        elements.append(Spacer(1, 10))
+        
+        table_data = [[
+            Paragraph("納品日", th_style),
+            Paragraph("書名", th_style),
+            Paragraph("請求数量", th_style),
+            Paragraph("単価", th_style),
+            Paragraph("金額", th_style),
+            Paragraph("備考", th_style)
+        ]]
+        
+        for item in items:
+            q_str = clean_val(item["請求数量"])
+            p_str = clean_val(item["単価"])
+            q_num = int(q_str) if q_str.isdigit() else 0
+            try:
+                p_num = float(p_str) if p_str else 0.0
+            except ValueError:
+                p_num = 0.0
+            line_total = q_num * p_num
+            
+            table_data.append([
+                Paragraph(clean_val(item["売上日"]), td_style),
+                Paragraph(item["書名"], td_style),
+                Paragraph(f"{q_num} 部", td_right),
+                Paragraph(f"￥{p_num:,.2f}", td_right),
+                Paragraph(f"￥{line_total:,.2f}", td_right),
+                Paragraph(item["備考"], td_style)
+            ])
+            
+        inv_table = Table(table_data, colWidths=[75, 180, 60, 75, 80, 75])
+        inv_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
+        ]))
+        elements.append(inv_table)
+        elements.append(Spacer(1, 10))
+        
+        bank_text = f"<b>【お振込先口座】</b><br/>{bank_info['bank_name']} {bank_info['bank_branch']} ({bank_info['bank_type']}) {bank_info['bank_account']}<br/>口座名義: {bank_info['bank_holder']}"
+        bank_table = Table([[Paragraph(bank_text, td_style)]], colWidths=[280])
+        bank_table.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#F9F9F9")),
+            ("BOX", (0,0), (-1,-1), 1, colors.HexColor("#333333")),
+            ("TOPPADDING", (0,0), (-1,-1), 6),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+            ("LEFTPADDING", (0,0), (-1,-1), 8),
+            ("RIGHTPADDING", (0,0), (-1,-1), 8),
+        ]))
+        elements.append(bank_table)
+
     doc.build(elements)
     buffer.seek(0)
     return buffer
@@ -874,162 +1049,31 @@ with tab2:
         df_preview = pd.DataFrame(delivery_rows)
         st.dataframe(df_preview, use_container_width=True)
         
-        if st.button("🚀 グループ別 A4横 納品書プレビュー / 印刷を作成", type="primary", key="btn_pdf_deliv_grouped"):
-            from collections import defaultdict
-            grouped_deliv = defaultdict(list)
-            for r in delivery_rows:
-                key = (r["納品日"], r["配車区分"], r["出版社名"], r["納品書番号"])
-                grouped_deliv[key].append(r)
-                
-            html_content = f"""
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <title></title> <!-- ★ 上部タイトル非表示用 -->
-                <style>
-                    @page {{
-                        size: A4 landscape;
-                        margin: 10mm;
-                    }}
-                    body {{
-                        font-family: 'Helvetica Neue', Arial, sans-serif;
-                        color: #333;
-                        margin: 0;
-                        padding: 0;
-                        background: #fff;
-                    }}
-                    .invoice-page {{
-                        width: 267mm;
-                        min-height: 180mm;
-                        page-break-after: always;
-                        margin-bottom: 20px;
-                        padding-bottom: 20px;
-                        border-bottom: 2px dashed #ccc;
-                        box-sizing: border-box;
-                    }}
-                    h1 {{
-                        text-align: center;
-                        border-bottom: 2px solid #333;
-                        padding-bottom: 8px;
-                        margin-bottom: 10px;
-                        font-size: 24px;
-                        letter-spacing: 4px;
-                    }}
-                    .meta {{
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: flex-start;
-                        margin-bottom: 15px;
-                        font-size: 14px;
-                    }}
-                    .customer-name {{
-                        font-size: 26px;
-                        font-weight: bold;
-                        border-bottom: 2px solid #333;
-                        padding-bottom: 4px;
-                        display: inline-block;
-                        margin-bottom: 5px;
-                    }}
-                    .supplier-info {{
-                        text-align: right;
-                        font-size: 13px;
-                        line-height: 1.4;
-                    }}
-                    .group-header {{
-                        background-color: #f1f3f5;
-                        padding: 8px 12px;
-                        margin-bottom: 15px;
-                        font-weight: bold;
-                        border-left: 5px solid #007bff;
-                        font-size: 14px;
-                    }}
-                    table {{
-                        width: 100%;
-                        border-collapse: collapse;
-                        margin-top: 10px;
-                        margin-bottom: 20px;
-                        font-size: 14px;
-                    }}
-                    th, td {{
-                        border: 1px solid #ccc;
-                        padding: 10px;
-                        text-align: left;
-                    }}
-                    th {{
-                        background-color: #e9ecef;
-                        font-weight: bold;
-                    }}
-                    .right {{
-                        text-align: right;
-                    }}
-                    @media print {{
-                        body {{ padding: 0; }}
-                        .no-print {{ display: none; }}
-                        .invoice-page {{ border-bottom: none; }}
-                    }}
-                </style>
-            </head>
-            <body>
-            """
+        from collections import defaultdict
+        grouped_deliv = defaultdict(list)
+        for r in delivery_rows:
+            key = (r["納品日"], r["配車区分"], r["出版社名"], r["納品書番号"])
+            grouped_deliv[key].append(r)
             
-            for (d_date, car_div, pub_name, deliv_no), items in grouped_deliv.items():
-                html_content += f"""
-                <div class="invoice-page">
-                    <h1>納 品 書</h1>
-                    <div class="meta">
-                        <div>
-                            <span class="customer-name">{pub_name if pub_name else '（出版社名未設定）'} 御中</span><br>
-                            <p style="margin: 5px 0 0 0;"><strong>納品書番号:</strong> {deliv_no}</p>
-                        </div>
-                        <div class="supplier-info">
-                            <strong>(株)中永製本所</strong><br>
-                            埼玉県さいたま市岩槻区真福寺1400<br>
-                            TEL 048-798-7377<br>
-                            <strong>発行日:</strong> {datetime.now().strftime('%Y-%m-%d')}
-                        </div>
-                    </div>
-                    
-                    <div class="group-header">
-                        納品日: {d_date if d_date else '（未設定）'} &nbsp;&nbsp;|&nbsp;&nbsp; 配車区分: {car_div if car_div else '（未設定）'}
-                    </div>
-                    
-                    <p>下記のとおり納品いたしました。</p>
-                    <table>
-                        <tr>
-                            <th>書名 （製本数）</th>
-                            <th class="right" style="width: 100px;">数量</th>
-                            <th class="right" style="width: 100px;">PL数</th>
-                            <th class="right" style="width: 100px;">見本数</th>
-                            <th style="width: 250px;">備考</th>
-                        </tr>
-                """
-                for item in items:
-                    title_display = f"{item['書名']} （{item['製本数']}部）" if item['書名'] else '（書名なし）'
-                    html_content += f"""
-                        <tr>
-                            <td>{title_display}</td>
-                            <td class="right">{item['数量']} 部</td>
-                            <td class="right">{item['PL数']} PL</td>
-                            <td class="right">{item['見本数']} 部</td>
-                            <td>{item['備考']}</td>
-                        </tr>
-                    """
-                html_content += f"""
-                    </table>
-                </div>
-                """
-                
-            html_content += f"""
-                <div class="no-print" style="text-align: center; margin-top: 30px;">
-                    <button onclick="window.print();" style="padding: 12px 24px; font-size: 16px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ A4横で一括印刷 / PDF保存する</button>
-                </div>
-            </body>
-            </html>
-            """
-            st.success("A4横対応・納品元情報付きの納品書が生成されました！")
-            
-            b64_html = base64.b64encode(html_content.encode("utf-8")).decode("utf-8")
-            st.components.v1.iframe(f"data:text/html;base64,{b64_html}", height=600, scrolling=True)
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            excel_bytes_deliv = to_excel_bytes(df_preview)
+            st.download_button(
+                label="📥 納品書データを Excel でダウンロード",
+                data=excel_bytes_deliv,
+                file_name=f"納品書データ_{date.today().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_excel_deliv"
+            )
+        with col_d2:
+            pdf_bytes_deliv = generate_delivery_pdf(grouped_deliv)
+            st.download_button(
+                label="🖨️ 納品書を PDF でダウンロード",
+                data=pdf_bytes_deliv,
+                file_name=f"納品書_{date.today().strftime('%Y%m%d')}.pdf",
+                mime="application/pdf",
+                key="dl_pdf_deliv"
+            )
 
 # ==========================================
 # タブ3：請求書発行
@@ -1071,214 +1115,35 @@ with tab3:
         df_inv_preview = pd.DataFrame(invoice_rows)
         st.dataframe(df_inv_preview, use_container_width=True)
         
-        if st.button("🚀 出版社別 請求書プレビュー / 印刷を作成", type="primary", key="btn_pdf_invoice"):
-            from collections import defaultdict
-            grouped_invoice = defaultdict(list)
-            for r in invoice_rows:
-                grouped_invoice[r["出版社名"]].append(r)
-                
-            inv_html = f"""
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <title></title> <!-- ★ 上部タイトル非表示用 -->
-                <style>
-                    @page {{
-                        size: A4 portrait;
-                        margin: 10mm;
-                    }}
-                    body {{
-                        font-family: 'Helvetica Neue', Arial, sans-serif;
-                        color: #333;
-                        margin: 0;
-                        padding: 0;
-                        background: #fff;
-                    }}
-                    .invoice-page {{
-                        width: 180mm;
-                        min-height: 250mm;
-                        page-break-after: always;
-                        margin-bottom: 20px;
-                        padding-bottom: 20px;
-                        border-bottom: 2px dashed #ccc;
-                        box-sizing: border-box;
-                    }}
-                    h1 {{
-                        text-align: center;
-                        border-bottom: 2px solid #333;
-                        padding-bottom: 8px;
-                        margin-bottom: 15px;
-                        font-size: 24px;
-                        letter-spacing: 4px;
-                    }}
-                    .meta {{
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: flex-start;
-                        margin-bottom: 20px;
-                        font-size: 14px;
-                    }}
-                    .customer-name {{
-                        font-size: 24px;
-                        font-weight: bold;
-                        border-bottom: 2px solid #333;
-                        padding-bottom: 4px;
-                        display: inline-block;
-                        margin-bottom: 10px;
-                    }}
-                    .supplier-info {{
-                        text-align: right;
-                        font-size: 13px;
-                        line-height: 1.4;
-                    }}
-                    .summary-box {{
-                        background-color: #f8f9fa;
-                        border: 1px solid #ced4da;
-                        padding: 12px 15mm;
-                        margin-bottom: 20px;
-                        font-size: 15px;
-                    }}
-                    table {{
-                        width: 100%;
-                        border-collapse: collapse;
-                        margin-top: 10px;
-                        margin-bottom: 20px;
-                        font-size: 13px;
-                    }}
-                    th, td {{
-                        border: 1px solid #ccc;
-                        padding: 8px 10px;
-                        text-align: left;
-                    }}
-                    th {{
-                        background-color: #e9ecef;
-                        font-weight: bold;
-                    }}
-                    .right {{
-                        text-align: right;
-                    }}
-                    .bank-box {{
-                        border: 1px solid #333;
-                        padding: 12px;
-                        margin-top: 15px;
-                        background-color: #f9f9f9;
-                        width: 320px;
-                        font-size: 13px;
-                        line-height: 1.4;
-                    }}
-                    @media print {{
-                        body {{ padding: 0; }}
-                        .no-print {{ display: none; }}
-                        .invoice-page {{ border-bottom: none; }}
-                    }}
-                </style>
-            </head>
-            <body>
-            """
+        from collections import defaultdict
+        grouped_invoice = defaultdict(list)
+        for r in invoice_rows:
+            grouped_invoice[r["出版社名"]].append(r)
             
-            for pub_name, items in grouped_invoice.items():
-                sale_dates = [parse_date_safe(i["売上日"]) for i in items if parse_date_safe(i["売上日"])]
-                if sale_dates:
-                    min_d = min(sale_dates).strftime('%Y年%m月%d日')
-                    max_d = max(sale_dates).strftime('%Y年%m月%d日')
-                    period_str = f"{min_d} ～ {max_d}" if min_d != max_d else min_d
-                else:
-                    period_str = datetime.now().strftime('%Y年%m月度')
-
-                subtotal = 0
-                for item in items:
-                    q_str = clean_val(item["請求数量"])
-                    p_str = clean_val(item["単価"])
-                    q_num = int(q_str) if q_str.isdigit() else 0
-                    try:
-                        p_num = float(p_str) if p_str else 0.0
-                    except ValueError:
-                        p_num = 0.0
-                    subtotal += q_num * p_num
-                
-                tax_amount = round(subtotal * 0.10)
-                grand_total = subtotal + tax_amount
-
-                inv_html += f"""
-                <div class="invoice-page">
-                    <h1>請 求 書</h1>
-                    <div class="meta">
-                        <div>
-                            <span class="customer-name">{pub_name if pub_name else '（出版社名未設定）'} 御中</span><br>
-                            <p style="margin: 5px 0 0 0;">下記のとおりご請求申し上げます。</p>
-                        </div>
-                        <div class="supplier-info">
-                            <strong>(株)中永製本所</strong><br>
-                            埼玉県さいたま市岩槻区真福寺1400<br>
-                            TEL 048-798-7377<br>
-                            <strong>発行日:</strong> {datetime.now().strftime('%Y-%m-%d')}
-                        </div>
-                    </div>
-                    
-                    <div class="summary-box">
-                        <table style="width: 100%; border: none; margin: 0;">
-                            <tr style="border: none;">
-                                <td style="border: none; padding: 2px 0;"><strong>売上期間:</strong> {period_str}</td>
-                                <td style="border: none; padding: 2px 0; text-align: right; font-size: 16px;"><strong>ご請求金額合計（税込）: ￥{grand_total:,.0f}</strong></td>
-                            </tr>
-                            <tr style="border: none;">
-                                <td style="border: none; padding: 2px 0;"></td>
-                                <td style="border: none; padding: 2px 0; text-align: right; color: #555;">（うち消費税額等: ￥{tax_amount:,.0f}）</td>
-                            </tr>
-                        </table>
-                    </div>
-                    
-                    <table>
-                        <tr>
-                            <th style="width: 90px;">納品日</th>
-                            <th>書名</th>
-                            <th class="right" style="width: 70px;">請求数量</th>
-                            <th class="right" style="width: 90px;">単価</th>
-                            <th class="right" style="width: 100px;">金額</th>
-                            <th style="width: 120px;">備考</th>
-                        </tr>
-                """
-                
-                for item in items:
-                    q_str = clean_val(item["請求数量"])
-                    p_str = clean_val(item["単価"])
-                    q_num = int(q_str) if q_str.isdigit() else 0
-                    try:
-                        p_num = float(p_str) if p_str else 0.0
-                    except ValueError:
-                        p_num = 0.0
-                    line_total = q_num * p_num
-                    
-                    inv_html += f"""
-                        <tr>
-                            <td>{clean_val(item["売上日"])}</td>
-                            <td>{item["書名"]}</td>
-                            <td class="right">{q_num} 部</td>
-                            <td class="right">￥{p_num:,.2f}</td>
-                            <td class="right">￥{line_total:,.2f}</td>
-                            <td>{item["備考"]}</td>
-                        </tr>
-                    """
-                
-                inv_html += f"""
-                    </table>
-                    
-                    <div class="bank-box">
-                        <b>【お振込先口座】</b><br>
-                        {bank_name} {bank_branch} ({bank_type}) {bank_account}<br>
-                        口座名義: {bank_holder}
-                    </div>
-                </div>
-                """
-                
-            inv_html += f"""
-                <div class="no-print" style="text-align: center; margin-top: 30px;">
-                    <button onclick="window.print();" style="padding: 12px 24px; font-size: 16px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ 請求書を一括印刷 / PDF保存する</button>
-                </div>
-            </body>
-            </html>
-            """
-            
-            st.success("出版社別の請求書が生成されました！")
-            b64_inv_html = base64.b64encode(inv_html.encode("utf-8")).decode("utf-8")
-            st.components.v1.iframe(f"data:text/html;base64,{b64_inv_html}", height=600, scrolling=True)
+        bank_info_dict = {
+            "bank_name": bank_name,
+            "bank_branch": bank_branch,
+            "bank_type": bank_type,
+            "bank_account": bank_account,
+            "bank_holder": bank_holder
+        }
+        
+        col_i1, col_i2 = st.columns(2)
+        with col_i1:
+            excel_bytes_inv = to_excel_bytes(df_inv_preview)
+            st.download_button(
+                label="📥 請求書データを Excel でダウンロード",
+                data=excel_bytes_inv,
+                file_name=f"請求書データ_{date.today().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_excel_inv"
+            )
+        with col_i2:
+            pdf_bytes_inv = generate_invoice_pdf(grouped_invoice, bank_info_dict)
+            st.download_button(
+                label="🖨️ 請求書を PDF でダウンロード",
+                data=pdf_bytes_inv,
+                file_name=f"請求書_{date.today().strftime('%Y%m%d')}.pdf",
+                mime="application/pdf",
+                key="dl_pdf_inv"
+            )
