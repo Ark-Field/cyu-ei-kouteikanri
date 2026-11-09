@@ -242,7 +242,6 @@ with tab1:
                         "納品数": str(rec_88.get("field-88_4", "")) if rec_88.get("field-88_4") is not None else "",
                         "PL数": str(rec_88.get("field-88_7", "")) if rec_88.get("field-88_7") is not None else "",
                         "見本数量": str(rec_88.get("field-88_8", "")) if rec_88.get("field-88_8") is not None else "",
-                        "配車区分": str(rec_88.get("field-88_10", "A便")) if rec_88.get("field-88_10") is not None else "A便",
                         "納品チェック": bool(rec_88.get("field-88_11", False)),
                         # 請求関連 (field-89)
                         "売上日": parse_date_safe(rec_89.get("field-89_1")),
@@ -280,7 +279,6 @@ with tab1:
                     "納品数": st.column_config.TextColumn("納品数", help="納品数（field-88_4）"),
                     "PL数": st.column_config.TextColumn("PL数", help="PL数（field-88_7）"),
                     "見本数量": st.column_config.TextColumn("見本数量", help="見本数量（field-88_8）"),
-                    "配車区分": st.column_config.SelectboxColumn("配車区分", options=["A便", "B便", "自社便", "宅急便"], help="配車区分（field-88_10）"),
                     "納品チェック": st.column_config.CheckboxColumn("納品チェック", help="納品書対象チェック（field-88_11）"),
                     "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
                     "請求数量": st.column_config.TextColumn("請求数量"),
@@ -459,7 +457,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
             else:
                 record_payload["field-90"] = orig_sub_90
 
-            # 2. field-88 (納品明細) の構築（💡 配車区分 field-88_10 の書き込みを一時的に中止・除外）
+            # 2. field-88 (納品明細) の構築（💡 無効なキーを完全にクレンジング）
             orig_sub_88 = original_rec.get("field-88", [])
             sub88_list = []
             if source_tab == "flat":
@@ -481,9 +479,13 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     rec_dict_88["field-88_4"] = str(row_88["納品数"]) if pd.notna(row_88["納品数"]) else "0"
                     rec_dict_88["field-88_7"] = str(row_88["PL数"]) if pd.notna(row_88["PL数"]) else "0"
                     rec_dict_88["field-88_8"] = str(row_88["見本数量"]) if pd.notna(row_88["見本数量"]) else "0"
-                    # ❌ 配車区分（field-88_10）のエラー検証のため、一時的に送信から除外します
-                    # rec_dict_88["field-88_10"] = str(row_88["配車区分"]) if pd.notna(row_88["配車区分"]) else ""
                     rec_dict_88["field-88_11"] = bool(row_88["納品チェック"])
+                    
+                    # ❌ 有効なキー以外を完全に削除
+                    for k in list(rec_dict_88.keys()):
+                        if k not in ["field-88_2", "field-88_4", "field-88_7", "field-88_8", "field-88_11"]:
+                            rec_dict_88.pop(k, None)
+                            
                     item_88["record"] = rec_dict_88
                     sub88_list.append(item_88)
                 else:
@@ -501,10 +503,17 @@ if st.button("💾 チェックを入れたデータを データベース に�
                 cleaned_sub_88 = []
                 if isinstance(orig_sub_88, list):
                     for sub_item in orig_sub_88:
-                        cleaned_sub_88.append(copy.deepcopy(sub_item))
+                        sub_item_copy = copy.deepcopy(sub_item)
+                        if isinstance(sub_item_copy, dict):
+                            rec_sub = sub_item_copy.get("record", sub_item_copy)
+                            if isinstance(rec_sub, dict):
+                                for k in list(rec_sub.keys()):
+                                    if k not in ["field-88_2", "field-88_4", "field-88_7", "field-88_8", "field-88_11"]:
+                                        rec_sub.pop(k, None)
+                        cleaned_sub_88.append(sub_item_copy)
                 record_payload["field-88"] = cleaned_sub_88
 
-            # 3. field-89 (請求/売上明細) の構築
+            # 3. field-89 (請求/売上明細) の構築（💡 無効なキー field-89_5, field-89_6 を完全にクレンジング）
             orig_sub_89 = original_rec.get("field-89", [])
             sub89_list = []
             if source_tab == "flat":
@@ -513,6 +522,12 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     item_89 = copy.deepcopy(orig_sub_89[0])
                     rec_dict_89 = item_89.get("record", {})
                     rec_dict_89["field-89_10"] = bool(row_89["請求チェック"])
+                    
+                    # ❌ エラーの原因となる field-89_5, field-89_6 などの不要なキーをすべて削除
+                    for k in list(rec_dict_89.keys()):
+                        if k not in ["field-89_1", "field-89_3", "field-89_10"]:
+                            rec_dict_89.pop(k, None)
+                            
                     item_89["record"] = rec_dict_89
                     sub89_list.append(item_89)
                 else:
@@ -526,7 +541,14 @@ if st.button("💾 チェックを入れたデータを データベース に�
                 cleaned_sub_89_sales = []
                 if isinstance(orig_sub_89, list):
                     for sub_item in orig_sub_89:
-                        cleaned_sub_89_sales.append(copy.deepcopy(sub_item))
+                        sub_item_copy = copy.deepcopy(sub_item)
+                        if isinstance(sub_item_copy, dict):
+                            rec_sub = sub_item_copy.get("record", sub_item_copy)
+                            if isinstance(rec_sub, dict):
+                                for k in list(rec_sub.keys()):
+                                    if k not in ["field-89_1", "field-89_3", "field-89_10"]:
+                                        rec_sub.pop(k, None)
+                        cleaned_sub_89_sales.append(sub_item_copy)
                 record_payload["field-89"] = cleaned_sub_89_sales
 
             # 4. field-91 (付物明細) の構築
@@ -606,7 +628,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
 # ==========================================
 with tab2:
     st.header("📦 納品書発行")
-    st.info("💡 タブ1の明細で**「納品チェック」**にチェックが入れられ、保存されたデータから納品書を作成します。")
+    st.info("💡 タブ1の明細で**納品チェック**にチェックが入れられ、保存されたデータから納品書を作成します。")
     
     raw_deliv_list = sample_rec.get("field-88", []) if 'sample_rec' in locals() else []
     delivery_rows = []
