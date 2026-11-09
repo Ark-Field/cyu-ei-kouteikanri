@@ -267,7 +267,7 @@ with tab1:
                         # 請求関連 (field-89)
                         "売上日": parse_date_safe(rec_89.get("field-89_1")),
                         "請求数量": clean_val(rec_89.get("field-89_3", "")),
-                        "備考_請求": clean_val(rec_89.get("field-89_4", "")),
+                        "請求備考": clean_val(rec_89.get("field-89_7", "")),
                         "請求": False
                     })
             
