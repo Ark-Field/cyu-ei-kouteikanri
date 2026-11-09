@@ -459,12 +459,11 @@ if st.button("💾 チェックを入れたデータを データベース に�
             else:
                 record_payload["field-90"] = orig_sub_90
 
-            # 2. field-88 (納品明細) の構築（💡 日付や数値の形式エラーを防ぐ安全なクレンジング処理）
+            # 2. field-88 (納品明細) の構築（💡 配車区分 field-88_10 の書き込みを一時的に中止・除外）
             orig_sub_88 = original_rec.get("field-88", [])
             sub88_list = []
             if source_tab == "flat":
                 row_88 = first_row
-                # 納品日のフォーマットチェック（NaTや不正な値を防ぐ）
                 deliv_date_val = row_88["納品日"]
                 deliv_date_str = ""
                 if pd.notna(deliv_date_val):
@@ -482,7 +481,8 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     rec_dict_88["field-88_4"] = str(row_88["納品数"]) if pd.notna(row_88["納品数"]) else "0"
                     rec_dict_88["field-88_7"] = str(row_88["PL数"]) if pd.notna(row_88["PL数"]) else "0"
                     rec_dict_88["field-88_8"] = str(row_88["見本数量"]) if pd.notna(row_88["見本数量"]) else "0"
-                    rec_dict_88["field-88_10"] = str(row_88["配車区分"]) if pd.notna(row_88["配車区分"]) else "A便"
+                    # ❌ 配車区分（field-88_10）のエラー検証のため、一時的に送信から除外します
+                    # rec_dict_88["field-88_10"] = str(row_88["配車区分"]) if pd.notna(row_88["配車区分"]) else ""
                     rec_dict_88["field-88_11"] = bool(row_88["納品チェック"])
                     item_88["record"] = rec_dict_88
                     sub88_list.append(item_88)
@@ -493,13 +493,11 @@ if st.button("💾 チェックを入れたデータを データベース に�
                             "field-88_4": str(first_row["納品数"]) if pd.notna(first_row["納品数"]) else "0",
                             "field-88_7": str(first_row["PL数"]) if pd.notna(first_row["PL数"]) else "0",
                             "field-88_8": str(first_row["見本数量"]) if pd.notna(first_row["見本数量"]) else "0",
-                            "field-88_10": str(first_row["配車区分"]) if pd.notna(first_row["配車区分"]) else "A便",
                             "field-88_11": bool(first_row["納品チェック"])
                         }
                     })
                 record_payload["field-88"] = sub88_list
             else:
-                # タブ1以外で保存された場合も既存のfield-88を安全に引き継ぎ
                 cleaned_sub_88 = []
                 if isinstance(orig_sub_88, list):
                     for sub_item in orig_sub_88:
@@ -531,7 +529,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
                         cleaned_sub_89_sales.append(copy.deepcopy(sub_item))
                 record_payload["field-89"] = cleaned_sub_89_sales
 
-            # 4. field-91 (付物明細) の構築（※印刷所フィールドを除外し、日付のみ安全に渡す）
+            # 4. field-91 (付物明細) の構築
             orig_sub_91 = original_rec.get("field-91", [])
             sub91_list = []
             if source_tab == "acc":
