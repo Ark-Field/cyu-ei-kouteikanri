@@ -194,7 +194,6 @@ def generate_delivery_pdf(grouped_deliv_dict):
     elements = []
     
     for idx, ((d_date, car_div, pub_name, deliv_no), items) in enumerate(grouped_deliv_dict.items()):
-        # 2件目以降は必ず改ページする
         if idx > 0:
             elements.append(PageBreak())
             
@@ -266,7 +265,6 @@ def generate_invoice_pdf(grouped_invoice_dict, bank_info):
     elements = []
     
     for idx, (pub_name, items) in enumerate(grouped_invoice_dict.items()):
-        # 2件目以降は必ず改ページする
         if idx > 0:
             elements.append(PageBreak())
             
@@ -534,71 +532,93 @@ with tab1:
         if api_records:
             st.success(f"✨ 対象レコード **{len(api_records)} 件** を取得しました。")
             
-            flat_data = []
-            for record_idx, r in enumerate(api_records):
-                h_ord_no = clean_val(r.get("field-2", ""))
-                h_ord_date = parse_date_safe(r.get("field-1"))
-                h_pub = clean_val(r.get("field-8", ""))
-                h_title = clean_val(r.get("field-13", ""))
-                h_qty = clean_val(r.get("field-4", ""))
-                h_price = clean_val(r.get("field-5", ""))
-                
-                rec_id = clean_val(r.get("_recordId", ""))
-                detail_url = f"{POCKET_BASE_URL}/apps/{APP_ID}/records/{rec_id}/detail" if rec_id and rec_id.lower() != "none" else ""
-                
-                sub_90 = r.get("field-90", [])
-                sub_88 = r.get("field-88", [])
-                sub_89 = r.get("field-89", [])
-                
-                max_len = max(len(sub_90) if isinstance(sub_90, list) else 0,
-                            len(sub_88) if isinstance(sub_88, list) else 0,
-                            len(sub_89) if isinstance(sub_89, list) else 0, 1)
-                
-                for i in range(max_len):
-                    item_90 = sub_90[i] if isinstance(sub_90, list) and len(sub_90) > i else {}
-                    rec_90 = item_90.get("record", item_90) if isinstance(item_90, dict) else {}
+            # DataFrameのセッション管理と初期化
+            if "df_flat_session" not in st.session_state or st.session_state.get("last_len") != len(api_records):
+                flat_data = []
+                for record_idx, r in enumerate(api_records):
+                    h_ord_no = clean_val(r.get("field-2", ""))
+                    h_ord_date = parse_date_safe(r.get("field-1"))
+                    h_pub = clean_val(r.get("field-8", ""))
+                    h_title = clean_val(r.get("field-13", ""))
+                    h_qty = clean_val(r.get("field-4", ""))
+                    h_price = clean_val(r.get("field-5", ""))
                     
-                    item_88 = sub_88[i] if isinstance(sub_88, list) and len(sub_88) > i else {}
-                    rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
+                    rec_id = clean_val(r.get("_recordId", ""))
+                    detail_url = f"{POCKET_BASE_URL}/apps/{APP_ID}/records/{rec_id}/detail" if rec_id and rec_id.lower() != "none" else ""
                     
-                    item_89 = sub_89[i] if isinstance(sub_89, list) and len(sub_89) > i else {}
-                    rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
+                    sub_90 = r.get("field-90", [])
+                    sub_88 = r.get("field-88", [])
+                    sub_89 = r.get("field-89", [])
                     
-                    val_88_10 = clean_val(rec_88.get("field-88_10", ""))
+                    max_len = max(len(sub_90) if isinstance(sub_90, list) else 0,
+                                len(sub_88) if isinstance(sub_88, list) else 0,
+                                len(sub_89) if isinstance(sub_89, list) else 0, 1)
+                    
+                    for i in range(max_len):
+                        item_90 = sub_90[i] if isinstance(sub_90, list) and len(sub_90) > i else {}
+                        rec_90 = item_90.get("record", item_90) if isinstance(item_90, dict) else {}
+                        
+                        item_88 = sub_88[i] if isinstance(sub_88, list) and len(sub_88) > i else {}
+                        rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
+                        
+                        item_89 = sub_89[i] if isinstance(sub_89, list) and len(sub_89) > i else {}
+                        rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
+                        
+                        val_88_10 = clean_val(rec_88.get("field-88_10", ""))
 
-                    flat_data.append({
-                        "更新": False,
-                        "_record_idx": record_idx,
-                        "詳細": detail_url,
-                        "受注番号": h_ord_no,
-                        "受注日": h_ord_date,
-                        "出版社名": h_pub,
-                        "書名": h_title,
-                        "製本数": h_qty,
-                        "単価": h_price,
-                        "配本日": parse_date_safe(rec_90.get("field-90_1")),
-                        "折本日": parse_date_safe(rec_90.get("field-90_3")),
-                        "無線日": parse_date_safe(rec_90.get("field-90_4")),
-                        "三方日": parse_date_safe(rec_90.get("field-90_5")),
-                        "仕上日": parse_date_safe(rec_90.get("field-90_6")),
-                        "備考": clean_val(rec_90.get("field-90_9", "")),
-                        "納品日": parse_date_safe(rec_88.get("field-88_2")),
-                        "納品数": clean_val(rec_88.get("field-88_4", "")),
-                        "PL数": clean_val(rec_88.get("field-88_7", "")),
-                        "見本数量": clean_val(rec_88.get("field-88_8", "")),
-                        "配車区分": val_88_10,
-                        "納品": False,
-                        "在庫出荷": False,
-                        "売上日": parse_date_safe(rec_89.get("field-89_1")),
-                        "請求数量": clean_val(rec_89.get("field-89_3", "")),
-                        "備考_請求": clean_val(rec_89.get("field-89_7", "")),
-                        "請求": False
-                    })
-            
-            df_flat = pd.DataFrame(flat_data)
-            
+                        flat_data.append({
+                            "更新": False,
+                            "_record_idx": record_idx,
+                            "詳細": detail_url,
+                            "受注番号": h_ord_no,
+                            "受注日": h_ord_date,
+                            "出版社名": h_pub,
+                            "書名": h_title,
+                            "製本数": h_qty,
+                            "単価": h_price,
+                            "配本日": parse_date_safe(rec_90.get("field-90_1")),
+                            "折本日": parse_date_safe(rec_90.get("field-90_3")),
+                            "無線日": parse_date_safe(rec_90.get("field-90_4")),
+                            "三方日": parse_date_safe(rec_90.get("field-90_5")),
+                            "仕上日": parse_date_safe(rec_90.get("field-90_6")),
+                            "備考": clean_val(rec_90.get("field-90_9", "")),
+                            "納品日": parse_date_safe(rec_88.get("field-88_2")),
+                            "納品数": clean_val(rec_88.get("field-88_4", "")),
+                            "PL数": clean_val(rec_88.get("field-88_7", "")),
+                            "見本数量": clean_val(rec_88.get("field-88_8", "")),
+                            "配車区分": val_88_10,
+                            "納品": False,
+                            "在庫出荷": False,
+                            "売上日": parse_date_safe(rec_89.get("field-89_1")),
+                            "請求数量": clean_val(rec_89.get("field-89_3", "")),
+                            "備考_請求": clean_val(rec_89.get("field-89_7", "")),
+                            "請求": False
+                        })
+                st.session_state["df_flat_session"] = pd.DataFrame(flat_data)
+                st.session_state["last_len"] = len(api_records)
+
+            # --- 一括選択・解除ボタン ---
+            st.markdown("##### ⚡ 一括チェック操作")
+            col_b1, col_b2, col_b3, col_b4, _ = st.columns([1, 1, 1, 1, 2])
+            with col_b1:
+                if st.button("☑️ 更新 全選択", key="all_update_on"):
+                    st.session_state["df_flat_session"]["更新"] = True
+                    st.rerun()
+            with col_b2:
+                if st.button("ロ 更新 全解除", key="all_update_off"):
+                    st.session_state["df_flat_session"]["更新"] = False
+                    st.rerun()
+            with col_b3:
+                if st.button("☑️ 請求 全選択", key="all_invoice_on"):
+                    st.session_state["df_flat_session"]["請求"] = True
+                    st.rerun()
+            with col_b4:
+                if st.button("ロ 請求 全解除", key="all_invoice_off"):
+                    st.session_state["df_flat_session"]["請求"] = False
+                    st.rerun()
+
             edited_flat_df = st.data_editor(
-                df_flat,
+                st.session_state["df_flat_session"],
                 num_rows="fixed",
                 key="grid_flat_main",
                 use_container_width=True,
@@ -636,10 +656,13 @@ with tab1:
                 }
             )
             
+            # ユーザーがエディタ上で手動変更した内容をセッションに同期
+            st.session_state["df_flat_session"] = edited_flat_df
+
             st.markdown("---")
             col_dl1, col_dl2 = st.columns(2)
             with col_dl1:
-                excel_bytes_ord = to_excel_bytes(df_flat)
+                excel_bytes_ord = to_excel_bytes(edited_flat_df)
                 st.download_button(
                     label="📥 受注一覧表を Excel でダウンロード",
                     data=excel_bytes_ord,
@@ -648,7 +671,7 @@ with tab1:
                     key="dl_excel_order"
                 )
             with col_dl2:
-                pdf_bytes_ord = generate_order_pdf(df_flat)
+                pdf_bytes_ord = generate_order_pdf(edited_flat_df)
                 st.download_button(
                     label="🖨️ 受注一覧表を PDF でダウンロード",
                     data=pdf_bytes_ord,
