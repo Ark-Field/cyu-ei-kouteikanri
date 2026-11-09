@@ -25,8 +25,36 @@ else:
 APP_ID = 34  # @pocket対象アプリID
 
 # ==========================================
-# 3. APIデータ取得関数
+# 3. 便利関数（データクリーニング・日付パース）
 # ==========================================
+def clean_val(val):
+    """None、NaN、文字列の 'none' や 'nan' を完全に空文字に変換する"""
+    if val is None:
+        return ""
+    if pd.isna(val):
+        return ""
+    s = str(val).strip()
+    if s.lower() in ["none", "nan", "nat", "null"]:
+        return ""
+    return s
+
+def parse_date_safe(val):
+    s = clean_val(val)
+    if not s:
+        return None
+    try:
+        if isinstance(val, (date, datetime)):
+            return val.date() if isinstance(val, datetime) else val
+        return datetime.strptime(s[:10].replace("/", "-"), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+# ==========================================
+# 4. URLパラメータのチェック
+# ==========================================
+query_params = st.query_params
+url_order_no = query_params.get("ord", None)
+
 def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, target_publisher=None):
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
     headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
@@ -102,22 +130,6 @@ def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, t
     
     return []
 
-def parse_date_safe(val):
-    if not val or str(val).lower() in ["nan", "none", "", "nat"]:
-        return None
-    try:
-        if isinstance(val, (date, datetime)):
-            return val.date() if isinstance(val, datetime) else val
-        return datetime.strptime(str(val)[:10].replace("/", "-"), "%Y-%m-%d").date()
-    except ValueError:
-        return None
-
-# ==========================================
-# 4. URLパラメータのチェック
-# ==========================================
-query_params = st.query_params
-url_order_no = query_params.get("ord", None)
-
 if "api_records" not in st.session_state or url_order_no:
     if url_order_no:
         with st.spinner(f"DBから受注番号: {url_order_no} のデータを取得中..."):
@@ -189,12 +201,12 @@ with tab1:
             
             flat_data = []
             for record_idx, r in enumerate(api_records):
-                h_ord_no = str(r.get("field-2", ""))
+                h_ord_no = clean_val(r.get("field-2", ""))
                 h_ord_date = parse_date_safe(r.get("field-1"))
-                h_pub = str(r.get("field-8", ""))
-                h_title = str(r.get("field-13", ""))
-                h_qty = str(r.get("field-4", ""))
-                h_price = str(r.get("field-5", ""))
+                h_pub = clean_val(r.get("field-8", ""))
+                h_title = clean_val(r.get("field-13", ""))
+                h_qty = clean_val(r.get("field-4", ""))
+                h_price = clean_val(r.get("field-5", ""))
                 
                 sub_90 = r.get("field-90", [])
                 sub_88 = r.get("field-88", [])
@@ -214,11 +226,10 @@ with tab1:
                     item_89 = sub_89[i] if isinstance(sub_89, list) and len(sub_89) > i else {}
                     rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
                     
-                    # 区分値の安全な取得（空欄をデフォルト許容）
-                    val_88_12 = str(rec_88.get("field-88_12", ""))
-                    val_89_11 = str(rec_89.get("field-89_11", ""))
-                    val_88_13 = str(rec_88.get("field-88_13", ""))
-                    val_88_10 = str(rec_88.get("field-88_10", ""))
+                    val_88_12 = clean_val(rec_88.get("field-88_12", ""))
+                    val_89_11 = clean_val(rec_89.get("field-89_11", ""))
+                    val_88_13 = clean_val(rec_88.get("field-88_13", ""))
+                    val_88_10 = clean_val(rec_88.get("field-88_10", ""))
 
                     flat_data.append({
                         "更新": False,
@@ -236,18 +247,18 @@ with tab1:
                         "三方日": parse_date_safe(rec_90.get("field-90_5")),
                         "仕上日": parse_date_safe(rec_90.get("field-90_6")),
                         "チェック": bool(rec_90.get("field-90_7", False)),
-                        "備考": str(rec_90.get("field-90_9", "")),
+                        "備考": clean_val(rec_90.get("field-90_9", "")),
                         # 納品関連 (field-88)
                         "納品日": parse_date_safe(rec_88.get("field-88_2")),
-                        "納品数": str(rec_88.get("field-88_4", "")) if rec_88.get("field-88_4") is not None else "",
-                        "PL数": str(rec_88.get("field-88_7", "")) if rec_88.get("field-88_7") is not None else "",
-                        "見本数量": str(rec_88.get("field-88_8", "")) if rec_88.get("field-88_8") is not None else "",
+                        "納品数": clean_val(rec_88.get("field-88_4", "")),
+                        "PL数": clean_val(rec_88.get("field-88_7", "")),
+                        "見本数量": clean_val(rec_88.get("field-88_8", "")),
                         "配車区分": val_88_10,
                         "納品区分": val_88_12 if val_88_12 in ["", "未", "納品", "済"] else "",
                         "在庫出荷": val_88_13 if val_88_13 in ["", "在庫から"] else "",
                         # 請求関連 (field-89)
                         "売上日": parse_date_safe(rec_89.get("field-89_1")),
-                        "請求数量": str(rec_89.get("field-89_3", "")) if rec_89.get("field-89_3") is not None else "",
+                        "請求数量": clean_val(rec_89.get("field-89_3", "")),
                         "請求区分": val_89_11 if val_89_11 in ["", "未", "請求", "済"] else ""
                     })
             
@@ -293,12 +304,12 @@ with tab1:
             
             target_record_idx = int(selected_rows.iloc[0]["_record_idx"])
             sample_rec = api_records[target_record_idx]
-            field_2 = str(selected_rows.iloc[0]["受注番号"])
-            field_1 = str(selected_rows.iloc[0]["受注日"])
-            field_8 = str(selected_rows.iloc[0]["出版社名"])
-            field_13 = str(selected_rows.iloc[0]["書名"])
-            field_4 = str(selected_rows.iloc[0]["製本数"])
-            field_5 = str(selected_rows.iloc[0]["単価"])
+            field_2 = clean_val(selected_rows.iloc[0]["受注番号"])
+            field_1 = clean_val(selected_rows.iloc[0]["受注日"])
+            field_8 = clean_val(selected_rows.iloc[0]["出版社名"])
+            field_13 = clean_val(selected_rows.iloc[0]["書名"])
+            field_4 = clean_val(selected_rows.iloc[0]["製本数"])
+            field_5 = clean_val(selected_rows.iloc[0]["単価"])
             
             st.info(f"📌 現在選択中のレコード: **受注番号 {field_2} ({field_13})** （納品書・請求書発行に連動しています）")
                 
@@ -321,9 +332,9 @@ with tab_accessory:
     if api_records and len(api_records) > 0:
         acc_flat_data = []
         for record_idx, r in enumerate(api_records):
-            h_ord_no = str(r.get("field-2", ""))
-            h_pub = str(r.get("field-8", ""))
-            h_title = str(r.get("field-13", ""))
+            h_ord_no = clean_val(r.get("field-2", ""))
+            h_pub = clean_val(r.get("field-8", ""))
+            h_title = clean_val(r.get("field-13", ""))
             
             sub_91 = r.get("field-91", [])
             max_len_91 = len(sub_91) if isinstance(sub_91, list) and len(sub_91) > 0 else 1
@@ -339,13 +350,13 @@ with tab_accessory:
                     "出版社名": h_pub,
                     "書名": h_title,
                     "表 日付": parse_date_safe(rec_91.get("field-91_1")),
-                    "表 印刷所": str(rec_91.get("field-91_2", "")),
+                    "表 印刷所": clean_val(rec_91.get("field-91_2", "")),
                     "カバー 日付": parse_date_safe(rec_91.get("field-91_5")),
-                    "カバー 印刷所": str(rec_91.get("field-91_6", "")),
+                    "カバー 印刷所": clean_val(rec_91.get("field-91_6", "")),
                     "カード 日付": parse_date_safe(rec_91.get("field-91_9")),
-                    "カード 印刷所": str(rec_91.get("field-91_10", "")),
+                    "カード 印刷所": clean_val(rec_91.get("field-91_10", "")),
                     "帯 日付": parse_date_safe(rec_91.get("field-91_13")),
-                    "帯 印刷所": str(rec_91.get("field-91_14", ""))
+                    "帯 印刷所": clean_val(rec_91.get("field-91_14", ""))
                 })
         
         df_acc = pd.DataFrame(acc_flat_data)
@@ -418,10 +429,10 @@ if st.button("💾 チェックを入れたデータを データベース に�
             first_row = group_df.iloc[0]
             
             record_payload = {
-                "field-2": str(original_rec.get("field-2", "")),
-                "field-1": str(original_rec.get("field-1", "")),
-                "field-4": str(original_rec.get("field-4", "")),
-                "field-5": str(original_rec.get("field-5", "")),
+                "field-2": clean_val(original_rec.get("field-2", "")),
+                "field-1": clean_val(original_rec.get("field-1", "")),
+                "field-4": clean_val(original_rec.get("field-4", "")),
+                "field-5": clean_val(original_rec.get("field-5", "")),
             }
             
             # 1. field-90 (工程日) の構築
@@ -432,25 +443,25 @@ if st.button("💾 チェックを入れたデータを データベース に�
                 if isinstance(orig_sub_90, list) and len(orig_sub_90) > 0:
                     item_90 = copy.deepcopy(orig_sub_90[0])
                     rec_dict = item_90.get("record", {})
-                    rec_dict["field-90_1"] = str(row_90["配本日"]) if pd.notna(row_90["配本日"]) else ""
-                    rec_dict["field-90_3"] = str(row_90["折本日"]) if pd.notna(row_90["折本日"]) else ""
-                    rec_dict["field-90_4"] = str(row_90["無線日"]) if pd.notna(row_90["無線日"]) else ""
-                    rec_dict["field-90_5"] = str(row_90["三方日"]) if pd.notna(row_90["三方日"]) else ""
-                    rec_dict["field-90_6"] = str(row_90["仕上日"]) if pd.notna(row_90["仕上日"]) else ""
+                    rec_dict["field-90_1"] = clean_val(row_90["配本日"])
+                    rec_dict["field-90_3"] = clean_val(row_90["折本日"])
+                    rec_dict["field-90_4"] = clean_val(row_90["無線日"])
+                    rec_dict["field-90_5"] = clean_val(row_90["三方日"])
+                    rec_dict["field-90_6"] = clean_val(row_90["仕上日"])
                     rec_dict["field-90_7"] = 1 if row_90["チェック"] else 0
-                    rec_dict["field-90_9"] = str(row_90["備考"]) if pd.notna(row_90["備考"]) else ""
+                    rec_dict["field-90_9"] = clean_val(row_90["備考"])
                     item_90["record"] = rec_dict
                     sub90_list.append(item_90)
                 else:
                     sub90_list.append({
                         "record": {
-                            "field-90_1": str(first_row["配本日"]) if pd.notna(first_row["配本日"]) else "",
-                            "field-90_3": str(first_row["折本日"]) if pd.notna(first_row["折本日"]) else "",
-                            "field-90_4": str(first_row["無線日"]) if pd.notna(first_row["無線日"]) else "",
-                            "field-90_5": str(first_row["三方日"]) if pd.notna(first_row["三方日"]) else "",
-                            "field-90_6": str(first_row["仕上日"]) if pd.notna(first_row["仕上日"]) else "",
+                            "field-90_1": clean_val(first_row["配本日"]),
+                            "field-90_3": clean_val(first_row["折本日"]),
+                            "field-90_4": clean_val(first_row["無線日"]),
+                            "field-90_5": clean_val(first_row["三方日"]),
+                            "field-90_6": clean_val(first_row["仕上日"]),
                             "field-90_7": 1 if first_row["チェック"] else 0,
-                            "field-90_9": str(first_row["備考"]) if pd.notna(first_row["備考"]) else "",
+                            "field-90_9": clean_val(first_row["備考"]),
                             "field-90_2": ""
                         }
                     })
@@ -458,7 +469,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
             else:
                 record_payload["field-90"] = orig_sub_90
 
-            # 2. field-88 (納品明細) の構築（配車区分・納品区分・在庫出荷を含める）
+            # 2. field-88 (納品明細) の構築（NONEを空文字にクレンジング）
             orig_sub_88 = original_rec.get("field-88", [])
             sub88_list = []
             if source_tab == "flat":
@@ -477,12 +488,12 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     item_88 = copy.deepcopy(orig_sub_88[0])
                     rec_dict_88 = item_88.get("record", {})
                     rec_dict_88["field-88_2"] = deliv_date_str
-                    rec_dict_88["field-88_4"] = str(row_88["納品数"]) if pd.notna(row_88["納品数"]) else "0"
-                    rec_dict_88["field-88_7"] = str(row_88["PL数"]) if pd.notna(row_88["PL数"]) else "0"
-                    rec_dict_88["field-88_8"] = str(row_88["見本数量"]) if pd.notna(row_88["見本数量"]) else "0"
-                    rec_dict_88["field-88_10"] = str(row_88["配車区分"]) if pd.notna(row_88["配車区分"]) else ""
-                    rec_dict_88["field-88_12"] = str(row_88["納品区分"]) if pd.notna(row_88["納品区分"]) else ""
-                    rec_dict_88["field-88_13"] = str(row_88["在庫出荷"]) if pd.notna(row_88["在庫出荷"]) else ""
+                    rec_dict_88["field-88_4"] = clean_val(row_88["納品数"]) or "0"
+                    rec_dict_88["field-88_7"] = clean_val(row_88["PL数"]) or "0"
+                    rec_dict_88["field-88_8"] = clean_val(row_88["見本数量"]) or "0"
+                    rec_dict_88["field-88_10"] = clean_val(row_88["配車区分"])
+                    rec_dict_88["field-88_12"] = clean_val(row_88["納品区分"])
+                    rec_dict_88["field-88_13"] = clean_val(row_88["在庫出荷"])
                     
                     item_88["record"] = rec_dict_88
                     sub88_list.append(item_88)
@@ -490,19 +501,19 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     sub88_list.append({
                         "record": {
                             "field-88_2": deliv_date_str,
-                            "field-88_4": str(first_row["納品数"]) if pd.notna(first_row["納品数"]) else "0",
-                            "field-88_7": str(first_row["PL数"]) if pd.notna(first_row["PL数"]) else "0",
-                            "field-88_8": str(first_row["見本数量"]) if pd.notna(first_row["見本数量"]) else "0",
-                            "field-88_10": str(first_row["配車区分"]) if pd.notna(first_row["配車区分"]) else "",
-                            "field-88_12": str(first_row["納品区分"]) if pd.notna(first_row["納品区分"]) else "",
-                            "field-88_13": str(first_row["在庫出荷"]) if pd.notna(first_row["在庫出荷"]) else ""
+                            "field-88_4": clean_val(first_row["納品数"]) or "0",
+                            "field-88_7": clean_val(first_row["PL数"]) or "0",
+                            "field-88_8": clean_val(first_row["見本数量"]) or "0",
+                            "field-88_10": clean_val(first_row["配車区分"]),
+                            "field-88_12": clean_val(first_row["納品区分"]),
+                            "field-88_13": clean_val(first_row["在庫出荷"])
                         }
                     })
                 record_payload["field-88"] = sub88_list
             else:
                 record_payload["field-88"] = orig_sub_88
 
-            # 3. field-89 (請求/売上明細) の構築（請求区分を含める）
+            # 3. field-89 (請求/売上明細) の構築（NONEを空文字にクレンジング）
             orig_sub_89 = original_rec.get("field-89", [])
             sub89_list = []
             if source_tab == "flat":
@@ -510,14 +521,14 @@ if st.button("💾 チェックを入れたデータを データベース に�
                 if isinstance(orig_sub_89, list) and len(orig_sub_89) > 0:
                     item_89 = copy.deepcopy(orig_sub_89[0])
                     rec_dict_89 = item_89.get("record", {})
-                    rec_dict_89["field-89_11"] = str(row_89["請求区分"]) if pd.notna(row_89["請求区分"]) else ""
+                    rec_dict_89["field-89_11"] = clean_val(row_89["請求区分"])
                     
                     item_89["record"] = rec_dict_89
                     sub89_list.append(item_89)
                 else:
                     sub89_list.append({
                         "record": {
-                            "field-89_11": str(first_row["請求区分"]) if pd.notna(first_row["請求区分"]) else ""
+                            "field-89_11": clean_val(first_row["請求区分"])
                         }
                     })
                 record_payload["field-89"] = sub89_list
@@ -533,20 +544,20 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     item_91 = copy.deepcopy(orig_sub_91[0])
                     rec_dict_91 = item_91.get("record", {})
                     
-                    rec_dict_91["field-91_1"] = str(row_91["表 日付"]) if pd.notna(row_91["表 日付"]) else ""
-                    rec_dict_91["field-91_5"] = str(row_91["カバー 日付"]) if pd.notna(row_91["カバー 日付"]) else ""
-                    rec_dict_91["field-91_9"] = str(row_91["カード 日付"]) if pd.notna(row_91["カード 日付"]) else ""
-                    rec_dict_91["field-91_13"] = str(row_91["帯 日付"]) if pd.notna(row_91["帯 日付"]) else ""
+                    rec_dict_91["field-91_1"] = clean_val(row_91["表 日付"])
+                    rec_dict_91["field-91_5"] = clean_val(row_91["カバー 日付"])
+                    rec_dict_91["field-91_9"] = clean_val(row_91["カード 日付"])
+                    rec_dict_91["field-91_13"] = clean_val(row_91["帯 日付"])
                     
                     item_91["record"] = rec_dict_91
                     sub91_list.append(item_91)
                 else:
                     sub91_list.append({
                         "record": {
-                            "field-91_1": str(first_row["表 日付"]) if pd.notna(first_row["表 日付"]) else "",
-                            "field-91_5": str(first_row["カバー 日付"]) if pd.notna(first_row["カバー 日付"]) else "",
-                            "field-91_9": str(first_row["カード 日付"]) if pd.notna(first_row["カード 日付"]) else "",
-                            "field-91_13": str(first_row["帯 日付"]) if pd.notna(first_row["帯 日付"]) else ""
+                            "field-91_1": clean_val(first_row["表 日付"]),
+                            "field-91_5": clean_val(first_row["カバー 日付"]),
+                            "field-91_9": clean_val(first_row["カード 日付"]),
+                            "field-91_13": clean_val(first_row["帯 日付"])
                         }
                     })
                 record_payload["field-91"] = sub91_list
@@ -583,7 +594,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
             st.error(f"❌ {fail_count} 件の保存に失敗しました。")
 
 # ==========================================
-# タブ2：納品書発行（field-88ベース ＆ 納品区分「納品」または「済」の絞り込み）
+# タブ2：納品書発行
 # ==========================================
 with tab2:
     st.header("📦 納品書発行")
@@ -595,15 +606,15 @@ with tab2:
     if raw_deliv_list:
         for item in raw_deliv_list:
             rec = item.get("record", item) if isinstance(item, dict) else {}
-            val_status = str(rec.get("field-88_12", ""))
+            val_status = clean_val(rec.get("field-88_12", ""))
             if val_status in ["納品", "済"]:
                 delivery_rows.append({
                     "納品日": parse_date_safe(rec.get("field-88_2")),
-                    "納品数": str(rec.get("field-88_4", "0")),
-                    "PL数": str(rec.get("field-88_7", "0")),
-                    "見本数量": str(rec.get("field-88_8", "0")),
-                    "配車区分": str(rec.get("field-88_10", "")),
-                    "在庫出荷": str(rec.get("field-88_13", "")),
+                    "納品数": clean_val(rec.get("field-88_4", "0")),
+                    "PL数": clean_val(rec.get("field-88_7", "0")),
+                    "見本数量": clean_val(rec.get("field-88_8", "0")),
+                    "配車区分": clean_val(rec.get("field-88_10", "")),
+                    "在庫出荷": clean_val(rec.get("field-88_13", "")),
                     "納品区分": val_status
                 })
     
@@ -638,9 +649,9 @@ with tab2:
                 <h1>納 品 書</h1>
                 <div class="meta">
                     <div>
-                        <p><strong>宛先 (顧客名):</strong> {field_8 if 'field_8' in locals() else ''} 御中</p>
-                        <p><strong>受注番号:</strong> {field_2 if 'field_2' in locals() else ''} / <strong>受注日:</strong> {field_1 if 'field_1' in locals() else ''}</p>
-                        <p><strong>書名 (件名):</strong> {field_13 if 'field_13' in locals() else ''}</p>
+                        <p><strong>宛先 (顧客名):</strong> {field_8} 御中</p>
+                        <p><strong>受注番号:</strong> {field_2} / <strong>受注日:</strong> {field_1}</p>
+                        <p><strong>書名 (件名):</strong> {field_13}</p>
                     </div>
                     <div>
                         <p><strong>発行日:</strong> {datetime.now().strftime('%Y-%m-%d')}</p>
@@ -659,13 +670,13 @@ with tab2:
                     </tr>
             """
             for row in delivery_rows:
-                d_date = str(row["納品日"]) if pd.notna(row["納品日"]) else ""
-                d_name = f"{field_13}" if 'field_13' in locals() else "本書"
-                d_car = row["配車区分"]
-                d_stock = row["在庫出荷"]
-                d_qty = row["納品数"]
-                d_pl = row["PL数"]
-                d_sample = row["見本数量"]
+                d_date = clean_val(row["納品日"])
+                d_name = field_13 if field_13 else "本書"
+                d_car = clean_val(row["配車区分"])
+                d_stock = clean_val(row["在庫出荷"])
+                d_qty = clean_val(row["納品数"])
+                d_pl = clean_val(row["PL数"])
+                d_sample = clean_val(row["見本数量"])
                 
                 html_content += f"""
                     <tr>
@@ -689,10 +700,10 @@ with tab2:
             """
             st.success("納品書が生成されました！下のボタン、またはプレビュー内の印刷ボタンをご利用ください。")
             st.components.v1.html(html_content, height=500, scrolling=True)
-            st.download_button("📥 納品書HTMLファイルをダウンロード", data=html_content.encode("utf-8"), file_name=f"納品書_{field_2 if 'field_2' in locals() else 'd'}.html", mime="text/html")
+            st.download_button("📥 納品書HTMLファイルをダウンロード", data=html_content.encode("utf-8"), file_name=f"納品書_{field_2 if field_2 else 'd'}.html", mime="text/html")
 
 # ==========================================
-# タブ3：請求書発行（請求区分「請求」または「済」の行のみ自動絞り込み ＆ 口座UI付き）
+# タブ3：請求書発行
 # ==========================================
 with tab3:
     st.header("📄 請求書発行（口座指定可）")
@@ -714,11 +725,11 @@ with tab3:
     if raw_sales_list:
         for item in raw_sales_list:
             rec = item.get("record", item) if isinstance(item, dict) else {}
-            val_status = str(rec.get("field-89_11", ""))
+            val_status = clean_val(rec.get("field-89_11", ""))
             if val_status in ["請求", "済"]:
                 invoice_rows.append({
                     "売上日": parse_date_safe(rec.get("field-89_1")),
-                    "請求数量": str(rec.get("field-89_3", "0")),
+                    "請求数量": clean_val(rec.get("field-89_3", "0")),
                     "請求区分": val_status
                 })
     
@@ -732,13 +743,13 @@ with tab3:
         
         if st.button("🚀 請求書プレビュー / 印刷（PDF）を作成", type="primary", key="btn_pdf_invoice"):
             try:
-                unit_price = float(field_5) if 'field_5' in locals() else 0
+                unit_price = float(field_5) if field_5 else 0
             except ValueError:
                 unit_price = 0
                 
             total_qty = 0
             for row in invoice_rows:
-                q_str = str(row["請求数量"])
+                q_str = clean_val(row["請求数量"])
                 if q_str.isdigit():
                     total_qty += int(q_str)
                     
@@ -767,9 +778,9 @@ with tab3:
                 <h1>請 求 書</h1>
                 <div class="meta">
                     <div>
-                        <p><strong>宛先:</strong> {field_8 if 'field_8' in locals() else ''} 御中</p>
-                        <p><strong>件名 (書名):</strong> {field_13 if 'field_13' in locals() else ''}</p>
-                        <p><strong>受注番号:</strong> {field_2 if 'field_2' in locals() else ''} / <strong>受注日:</strong> {field_1 if 'field_1' in locals() else ''}</p>
+                        <p><strong>宛先:</strong> {field_8} 御中</p>
+                        <p><strong>件名 (書名):</strong> {field_13}</p>
+                        <p><strong>受注番号:</strong> {field_2} / <strong>受注日:</strong> {field_1}</p>
                     </div>
                     <div>
                         <p><strong>発行日:</strong> {datetime.now().strftime('%Y-%m-%d')}</p>
@@ -785,10 +796,10 @@ with tab3:
                     </tr>
             """
             for row in invoice_rows:
-                s_date = str(row["売上日"]) if pd.notna(row["売上日"]) else ""
-                s_qty = row["請求数量"]
+                s_date = clean_val(row["売上日"])
+                s_qty = clean_val(row["請求数量"])
                 try:
-                    q_num = int(s_qty) if str(s_qty).isdigit() else 0
+                    q_num = int(s_qty) if s_qty.isdigit() else 0
                 except ValueError:
                     q_num = 0
                 sub_total = q_num * unit_price
@@ -820,4 +831,4 @@ with tab3:
             """
             st.success("請求書が生成されました！画面上のプレビュー、または印刷ボタンからPDFとして保存できます。")
             st.components.v1.html(inv_html, height=600, scrolling=True, key="preview_invoice_html")
-            st.download_button("📥 請求書HTMLファイルをダウンロード", data=inv_html.encode("utf-8"), file_name=f"請求書_{field_2 if 'field_2' in locals() else 'i'}.html", mime="text/html", key="download_invoice_html")
+            st.download_button("📥 請求書HTMLファイルをダウンロード", data=inv_html.encode("utf-8"), file_name=f"請求書_{field_2 if field_2 else 'i'}.html", mime="text/html", key="download_invoice_html")
