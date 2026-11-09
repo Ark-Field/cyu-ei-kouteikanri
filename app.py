@@ -597,7 +597,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
             st.error(f"❌ {fail_count} 件の保存に失敗しました。")
 
 # ==========================================
-# タブ2：納品書発行（納品日 ＞ 配車区分 ＞ 出版社名 ごとにグループ化）
+# タブ2：納品書発行（A4横・納品書番号10桁付与・顧客名拡大）
 # ==========================================
 with tab2:
     st.header("📦 納品書発行")
@@ -607,11 +607,34 @@ with tab2:
         delivery_rows = []
         for _, row in edited_flat_df.iterrows():
             if row.get("納品", False):
+                # 受注番号から納品書番号を生成（受注番号 + 納品日のMMDD、なければ本日MMDD）
+                ord_no_raw = clean_val(row.get("受注番号", ""))
+                d_date_val = row.get("納品日", "")
+                
+                mmdd = ""
+                if pd.notna(d_date_val):
+                    if isinstance(d_date_val, (date, datetime)):
+                        mmdd = d_date_val.strftime("%m%d")
+                    else:
+                        parsed_d = parse_date_safe(d_date_val)
+                        if parsed_d:
+                            mmdd = parsed_d.strftime("%m%d")
+                if not mmdd:
+                    mmdd = datetime.now().strftime("%m%d")
+                
+                # 受注番号に4桁のMMDDを足して10桁（足りなければ0埋め調整）
+                base_ord = ord_no_raw if ord_no_raw else "000000"
+                delivery_no = (base_ord + mmdd)[-10:] # 末尾10桁に調整、あるいはスライス
+                if len(delivery_no) < 10:
+                    delivery_no = delivery_no.zfill(10)
+
                 delivery_rows.append({
+                    "納品書番号": delivery_no,
                     "納品日": clean_val(row.get("納品日", "")),
                     "配車区分": clean_val(row.get("配車区分", "")),
                     "出版社名": clean_val(row.get("出版社名", "")),
                     "書名": clean_val(row.get("書名", "")),
+                    "製本数": clean_val(row.get("製本数", "0")),
                     "数量": clean_val(row.get("納品数", "0")),
                     "PL数": clean_val(row.get("PL数", "0")),
                     "見本数": clean_val(row.get("見本数量", "0")),
@@ -628,12 +651,11 @@ with tab2:
         df_preview = pd.DataFrame(delivery_rows)
         st.dataframe(df_preview, use_container_width=True)
         
-        if st.button("🚀 グループ別 納品書プレビュー / 印刷（PDF）を作成", type="primary", key="btn_pdf_deliv_grouped"):
-            # 納品日 × 配車区分 × 出版社名 でグループ化
+        if st.button("🚀 グループ別 A4横 納品書プレビュー / 印刷を作成", type="primary", key="btn_pdf_deliv_grouped"):
             from collections import defaultdict
             grouped_deliv = defaultdict(list)
             for r in delivery_rows:
-                key = (r["納品日"], r["配車区分"], r["出版社名"])
+                key = (r["納品日"], r["配車区分"], r["出版社名"], r["納品書番号"])
                 grouped_deliv[key].append(r)
                 
             html_content = f"""
@@ -641,15 +663,77 @@ with tab2:
             <head>
                 <meta charset="utf-8">
                 <style>
-                    body {{ font-family: 'Helvetica Neue', Arial, sans-serif; padding: 20px; color: #333; }}
-                    .invoice-page {{ page-break-after: always; margin-bottom: 50px; border-bottom: 2px dashed #ccc; padding-bottom: 30px; }}
-                    h1 {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 15px; font-size: 24px; }}
-                    .meta {{ display: flex; justify-content: space-between; margin-bottom: 15px; font-size: 14px; }}
-                    .group-header {{ background-color: #e9ecef; padding: 8px 12px; margin-bottom: 10px; font-weight: bold; border-left: 4px solid #007bff; }}
-                    table {{ width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 20px; font-size: 14px; }}
-                    th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-                    th {{ background-color: #f2f2f2; }}
-                    .right {{ text-align: right; }}
+                    /* A4横のページ設定 */
+                    @page {{
+                        size: A4 landscape;
+                        margin: 15mm;
+                    }}
+                    body {{
+                        font-family: 'Helvetica Neue', Arial, sans-serif;
+                        color: #333;
+                        margin: 0;
+                        padding: 0;
+                        background: #fff;
+                    }}
+                    .invoice-page {{
+                        width: 267mm; /* A4横 (297mm) から余白を引いた幅 */
+                        min-height: 180mm;
+                        page-break-after: always;
+                        margin-bottom: 20px;
+                        padding-bottom: 20px;
+                        border-bottom: 2px dashed #ccc;
+                        box-sizing: border-box;
+                    }}
+                    h1 {{
+                        text-align: center;
+                        border-bottom: 2px solid #333;
+                        padding-bottom: 8px;
+                        margin-bottom: 10px;
+                        font-size: 24px;
+                        letter-spacing: 4px;
+                    }}
+                    .meta {{
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: flex-start;
+                        margin-bottom: 15px;
+                        font-size: 14px;
+                    }}
+                    .customer-name {{
+                        font-size: 26px; /* 顧客名を大きく強調 */
+                        font-weight: bold;
+                        border-bottom: 2px solid #333;
+                        padding-bottom: 4px;
+                        display: inline-block;
+                        margin-bottom: 5px;
+                    }}
+                    .group-header {{
+                        background-color: #f1f3f5;
+                        padding: 8px 12px;
+                        margin-bottom: 15px;
+                        font-weight: bold;
+                        border-left: 5px solid #007bff;
+                        font-size: 14px;
+                    }}
+                    table {{
+                        width: 100%;
+                        border-collapse: collapse;
+                        margin-top: 10px;
+                        margin-bottom: 20px;
+                        font-size: 14px;
+                    }}
+                    th, td {{
+                        border: 1px solid #ccc;
+                        padding: 10px;
+                        text-align: left;
+                    }}
+                    th {{
+                        background-color: #e9ecef;
+                        font-weight: bold;
+                    }}
+                    .right {{
+                        text-align: right;
+                    }}
                     @media print {{
                         body {{ padding: 0; }}
                         .no-print {{ display: none; }}
@@ -660,15 +744,16 @@ with tab2:
             <body>
             """
             
-            for (d_date, car_div, pub_name), items in grouped_deliv.items():
+            for (d_date, car_div, pub_name, deliv_no), items in grouped_deliv.items():
                 html_content += f"""
                 <div class="invoice-page">
                     <h1>納 品 書</h1>
                     <div class="meta">
                         <div>
-                            <p><strong>宛先 (出版社名):</strong> {pub_name if pub_name else '（未設定）'} 御中</p>
+                            <span class="customer-name">{pub_name if pub_name else '（出版社名未設定）'} 御中</span><br>
+                            <p style="margin: 5px 0 0 0;"><strong>納品書番号:</strong> {deliv_no}</p>
                         </div>
-                        <div>
+                        <div style="text-align: right;">
                             <p><strong>発行日:</strong> {datetime.now().strftime('%Y-%m-%d')}</p>
                         </div>
                     </div>
@@ -680,17 +765,18 @@ with tab2:
                     <p>下記のとおり納品いたしました。</p>
                     <table>
                         <tr>
-                            <th>書名</th>
-                            <th class="right">数量</th>
-                            <th class="right">PL数</th>
-                            <th class="right">見本数</th>
-                            <th>備考</th>
+                            <th>書名 （製本数）</th>
+                            <th class="right" style="width: 100px;">数量</th>
+                            <th class="right" style="width: 100px;">PL数</th>
+                            <th class="right" style="width: 100px;">見本数</th>
+                            <th style="width: 250px;">備考</th>
                         </tr>
                 """
                 for item in items:
+                    title_display = f"{item['書名']} （{item['製本数']}部）" if item['書名'] else '（書名なし）'
                     html_content += f"""
                         <tr>
-                            <td>{item['書名'] if item['書名'] else '（書名なし）'}</td>
+                            <td>{title_display}</td>
                             <td class="right">{item['数量']} 部</td>
                             <td class="right">{item['PL数']} PL</td>
                             <td class="right">{item['見本数']} 部</td>
@@ -704,14 +790,14 @@ with tab2:
                 
             html_content += f"""
                 <div class="no-print" style="text-align: center; margin-top: 30px;">
-                    <button onclick="window.print();" style="padding: 12px 24px; font-size: 16px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ すべての納品書を一括印刷 / PDF保存する</button>
+                    <button onclick="window.print();" style="padding: 12px 24px; font-size: 16px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ A4横で一括印刷 / PDF保存する</button>
                 </div>
             </body>
             </html>
             """
-            st.success("納品書（納品日・配車区分・出版社名ごとのヘッダー形式）が生成されました！")
+            st.success("A4横対応・納品書番号付きの納品書が生成されました！")
             st.components.v1.html(html_content, height=600, scrolling=True)
-            st.download_button("📥 納品書HTMLファイルをダウンロード", data=html_content.encode("utf-8"), file_name=f"納品書_グループ別_{datetime.now().strftime('%Y%m%d')}.html", mime="text/html")
+            st.download_button("📥 納品書HTMLファイルをダウンロード", data=html_content.encode("utf-8"), file_name=f"納品書_A4横_{datetime.now().strftime('%Y%m%d')}.html", mime="text/html")
 
 # ==========================================
 # タブ3：請求書発行
