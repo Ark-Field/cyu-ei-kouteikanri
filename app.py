@@ -240,13 +240,12 @@ with tab1:
                         "書名": h_title,
                         "製本数": h_qty,
                         "単価": h_price,
-                        # 工程日 (field-90)
+                        # 工程日 (field-90) ※チェック項目は除外
                         "配本日": parse_date_safe(rec_90.get("field-90_1")),
                         "折本日": parse_date_safe(rec_90.get("field-90_3")),
                         "無線日": parse_date_safe(rec_90.get("field-90_4")),
                         "三方日": parse_date_safe(rec_90.get("field-90_5")),
                         "仕上日": parse_date_safe(rec_90.get("field-90_6")),
-                        "チェック": bool(rec_90.get("field-90_7", False)),
                         "備考": clean_val(rec_90.get("field-90_9", "")),
                         # 納品関連 (field-88)
                         "納品日": parse_date_safe(rec_88.get("field-88_2")),
@@ -283,7 +282,6 @@ with tab1:
                     "無線日": st.column_config.DateColumn("無線日", format="YYYY-MM-DD"),
                     "三方日": st.column_config.DateColumn("三方日", format="YYYY-MM-DD"),
                     "仕上日": st.column_config.DateColumn("仕上日", format="YYYY-MM-DD"),
-                    "チェック": st.column_config.CheckboxColumn("チェック"),
                     "備考": st.column_config.TextColumn("備考"),
                     "納品日": st.column_config.DateColumn("納品日", format="YYYY-MM-DD", help="納品日（field-88_2）"),
                     "納品数": st.column_config.TextColumn("納品数", help="納品数（field-88_4）"),
@@ -435,7 +433,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
                 "field-5": clean_val(original_rec.get("field-5", "")),
             }
             
-            # 1. field-90 (工程日) の構築
+            # 1. field-90 (工程日) の構築（チェック項目を省く）
             orig_sub_90 = original_rec.get("field-90", [])
             sub90_list = []
             if source_tab == "flat":
@@ -448,7 +446,6 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     rec_dict["field-90_4"] = clean_val(row_90["無線日"])
                     rec_dict["field-90_5"] = clean_val(row_90["三方日"])
                     rec_dict["field-90_6"] = clean_val(row_90["仕上日"])
-                    rec_dict["field-90_7"] = 1 if row_90["チェック"] else 0
                     rec_dict["field-90_9"] = clean_val(row_90["備考"])
                     item_90["record"] = rec_dict
                     sub90_list.append(item_90)
@@ -460,7 +457,6 @@ if st.button("💾 チェックを入れたデータを データベース に�
                             "field-90_4": clean_val(first_row["無線日"]),
                             "field-90_5": clean_val(first_row["三方日"]),
                             "field-90_6": clean_val(first_row["仕上日"]),
-                            "field-90_7": 1 if first_row["チェック"] else 0,
                             "field-90_9": clean_val(first_row["備考"]),
                             "field-90_2": ""
                         }
@@ -469,7 +465,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
             else:
                 record_payload["field-90"] = orig_sub_90
 
-            # 2. field-88 (納品明細) の構築（NONEを空文字にクレンジング）
+            # 2. field-88 (納品明細) の構築
             orig_sub_88 = original_rec.get("field-88", [])
             sub88_list = []
             if source_tab == "flat":
@@ -513,7 +509,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
             else:
                 record_payload["field-88"] = orig_sub_88
 
-            # 3. field-89 (請求/売上明細) の構築（NONEを空文字にクレンジング）
+            # 3. field-89 (請求/売上明細) の構築
             orig_sub_89 = original_rec.get("field-89", [])
             sub89_list = []
             if source_tab == "flat":
