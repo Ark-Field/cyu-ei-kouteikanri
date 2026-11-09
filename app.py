@@ -136,10 +136,10 @@ tab1, tab_accessory, tab2, tab3 = st.tabs([
 ])
 
 # ==========================================
-# タブ1：受注一覧表 ＆ 工程日・製本情報エディタ
+# タブ1：受注一覧表 ＆ 工程日・売上明細（納品日・納請区分含む）エディタ
 # ==========================================
 with tab1:
-    st.header("📋 受注一覧表")
+    st.header("📋 受注一覧表 ＆ 納品・工程管理")
     
     if url_order_no:
         st.success(f"🔗 DBから受注番号 **{url_order_no}** のデータを起動しました！")
@@ -228,7 +228,9 @@ with tab1:
                         "チェック": bool(rec_90.get("field-90_7", False)),
                         "備考": str(rec_90.get("field-90_9", "")),
                         "売上日": parse_date_safe(rec_89.get("field-89_1")),
-                        "請求数量": str(rec_89.get("field-89_3", ""))
+                        "請求数量": str(rec_89.get("field-89_3", "")),
+                        "納品日": parse_date_safe(rec_89.get("field-89_9")),
+                        "納請区分": bool(rec_89.get("field-89_10", False))
                     })
             
             df_flat = pd.DataFrame(flat_data)
@@ -239,7 +241,7 @@ with tab1:
                 key="grid_flat_main",
                 use_container_width=True,
                 column_config={
-                    "更新": st.column_config.CheckboxColumn("更新チェック", required=True, help="チェックを入れた行の受注データを@pocketに上書き保存します"),
+                    "更新": st.column_config.CheckboxColumn("更新チェック", required=True, help="チェックを入れた行のデータを@pocketに上書き保存します"),
                     "_record_idx": None,
                     "_id_90": None,
                     "_id_89": None,
@@ -257,7 +259,9 @@ with tab1:
                     "チェック": st.column_config.CheckboxColumn("チェック"),
                     "備考": st.column_config.TextColumn("備考"),
                     "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
-                    "請求数量": st.column_config.TextColumn("請求数量"),
+                    "請求数量": st.column_config.TextColumn("請求数量", disabled=True),
+                    "納品日": st.column_config.DateColumn("納品日", format="YYYY-MM-DD", help="納品日（field-89_9）"),
+                    "納請区分": st.column_config.CheckboxColumn("納請区分", help="チェック：納品 / 未チェック：請求 (field-89_10)"),
                 }
             )
             
@@ -433,8 +437,28 @@ if st.button("💾 チェックを入れたデータを データベース に�
             else:
                 record_payload["field-90"] = orig_sub_90
 
-            # 2. field-89 (売上/仕入) の維持
-            record_payload["field-89"] = original_rec.get("field-89", [])
+            # 2. field-89 (売上/仕入・納品日・納請区分) の構築
+            orig_sub_89 = original_rec.get("field-89", [])
+            sub89_list = []
+            if source_tab == "flat":
+                row_89 = first_row
+                if isinstance(orig_sub_89, list) and len(orig_sub_89) > 0:
+                    item_89 = copy.deepcopy(orig_sub_89[0])
+                    rec_dict_89 = item_89.get("record", {})
+                    rec_dict_89["field-89_9"] = str(row_89["納品日"]) if pd.notna(row_89["納品日"]) else ""
+                    rec_dict_89["field-89_10"] = bool(row_89["納請区分"])
+                    item_89["record"] = rec_dict_89
+                    sub89_list.append(item_89)
+                else:
+                    sub89_list.append({
+                        "record": {
+                            "field-89_9": str(first_row["納品日"]) if pd.notna(first_row["納品日"]) else "",
+                            "field-89_10": bool(first_row["納請区分"])
+                        }
+                    })
+                record_payload["field-89"] = sub89_list
+            else:
+                record_payload["field-89"] = orig_sub_89
 
             # 3. field-91 (付物明細) の構築
             orig_sub_91 = original_rec.get("field-91", [])
@@ -498,48 +522,35 @@ if st.button("💾 チェックを入れたデータを データベース に�
             st.error(f"❌ {fail_count} 件の保存に失敗しました。")
 
 # ==========================================
-# タブ2：納品書発行（売上/仕入明細 field-89 ベース ＆ 納品チェック絞り込み）
+# タブ2：納品書発行（タブ1で入力された納品日・納請区分を自動反映）
 # ==========================================
 with tab2:
-    st.header("📦 納品書発行（売上/仕入明細連動）")
-    st.info("💡 納請区分が**「納品」にチェックされている行のみ**が、自動的に納品書プレビューおよび印刷対象に絞り込まれます。")
+    st.header("📦 納品書発行")
+    st.info("💡 タブ1の明細で**「納請区分」にチェック**が入れられ、データベースに保存されたデータから、納品対象の行を自動で絞り込んで納品書を作成します。")
     
     raw_sales_list = sample_rec.get("field-89", []) if 'sample_rec' in locals() else []
-    deliv_table_data = []
+    delivery_rows = []
     
     if raw_sales_list:
         for item in raw_sales_list:
             rec = item.get("record", item) if isinstance(item, dict) else {}
-            deliv_table_data.append({
-                "納品日": parse_date_safe(rec.get("field-89_9")),
-                "納請区分": bool(rec.get("field-89_10", False)),
-                "請求数量": str(rec.get("field-89_3", "0")),
-                "売上日": parse_date_safe(rec.get("field-89_1"))
-            })
+            is_delivery = bool(rec.get("field-89_10", False))
+            if is_delivery:
+                delivery_rows.append({
+                    "納品日": parse_date_safe(rec.get("field-89_9")),
+                    "請求数量": str(rec.get("field-89_3", "0"))
+                })
+    
+    if not delivery_rows:
+        st.warning("⚠️ 現在選択中の受注データには、納請区分が「納品」にチェックされている明細がありません。\nタブ1の明細一覧で対象行にチェックを入れ、データベースに保存してから再度ご確認ください。")
     else:
-        deliv_table_data = [{"納品日": None, "納請区分": False, "請求数量": "0", "売上日": None}]
-    
-    df_deliv = pd.DataFrame(deliv_table_data)
-    edited_deliv = st.data_editor(
-        df_deliv,
-        num_rows="dynamic",
-        key="editor_deliv_sales_base",
-        use_container_width=True,
-        column_config={
-            "納品日": st.column_config.DateColumn("納品日", format="YYYY-MM-DD", help="納品日（field-89_9）"),
-            "納請区分": st.column_config.CheckboxColumn("納請区分", help="チェック：納品 / 未チェック：請求 (field-89_10)"),
-            "請求数量": st.column_config.TextColumn("数量 (請求数量)", disabled=True),
-            "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD", disabled=True)
-        }
-    )
-    
-    if st.button("🚀 納品書プレビュー / 印刷（PDF）を作成", type="primary", key="btn_pdf_deliv_sales"):
-        # 💡 納請区分が「納品（True）」にチェックされている行のみに絞り込む
-        delivery_rows = [row for _, row in edited_deliv.iterrows() if row["納請区分"] == True]
+        st.success(f"✨ 納品対象の明細が **{len(delivery_rows)} 件** 検出されました。")
         
-        if not delivery_rows:
-            st.warning("⚠️ 納請区分が「納品」にチェックされている行がありません。納品書を作成するには、対象行の「納請区分」にチェックを入れてください。")
-        else:
+        # 確認用のプレビューテーブル表示
+        df_preview = pd.DataFrame(delivery_rows)
+        st.dataframe(df_preview, use_container_width=True)
+        
+        if st.button("🚀 納品書プレビュー / 印刷（PDF）を作成", type="primary", key="btn_pdf_deliv_auto"):
             html_content = f"""
             <html>
             <head>
@@ -599,7 +610,7 @@ with tab2:
             </body>
             </html>
             """
-            st.success(f"納品書が生成されました！（対象件数: {len(delivery_rows)}件）")
+            st.success("納品書が生成されました！下のボタン、またはプレビュー内の印刷ボタンをご利用ください。")
             st.components.v1.html(html_content, height=500, scrolling=True)
             st.download_button("📥 納品書HTMLファイルをダウンロード", data=html_content.encode("utf-8"), file_name=f"納品書_{field_2 if 'field_2' in locals() else 'd'}.html", mime="text/html")
 
