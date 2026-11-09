@@ -126,7 +126,7 @@ if "api_records" not in st.session_state or url_order_no:
         st.session_state["api_records"] = fetch_pocket_records(start_date=default_start, end_date=default_end)
 
 # ==========================================
-# 5. タブ構成の定義（付物明細タブを追加）
+# 5. タブ構成の定義
 # ==========================================
 tab1, tab_accessory, tab2, tab3 = st.tabs([
     "📋 タブ1: 受注一覧表", 
@@ -298,7 +298,7 @@ with tab1:
         field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
 
 # ==========================================
-# タブ1.5（新設）：付物明細（表、カバー、帯、カード）
+# タブ1.5：付物明細（表、カバー、帯、カード）
 # ==========================================
 with tab_accessory:
     st.header("🏷️ 付物明細（表・カバー・帯・カード）管理")
@@ -361,12 +361,11 @@ with tab_accessory:
         st.warning("⚠️ 表示対象の受注データがありません。タブ1で検索を行ってください。")
 
 # ==========================================
-# 共通の一括上書き保存ボタン（タブ1＆付物タブ共通で動作）
+# 共通の一括上書き保存ボタン
 # ==========================================
 st.divider()
 
 if st.button("💾 チェックを入れたデータを データベース に一括上書き保存する", type="primary", key="btn_save_checked_all"):
-    # タブ1または付物タブでチェックされた行を判定
     checked_rows = pd.DataFrame()
     source_tab = None
     
@@ -403,7 +402,6 @@ if st.button("💾 チェックを入れたデータを データベース に�
             update_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records/{record_id}"
             first_row = group_df.iloc[0]
             
-            # 親ヘッダー情報の維持
             record_payload = {
                 "field-2": str(original_rec.get("field-2", "")),
                 "field-1": str(original_rec.get("field-1", "")),
@@ -453,7 +451,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
             # 3. field-89 (売上) の維持
             record_payload["field-89"] = original_rec.get("field-89", [])
 
-            # 4. field-91 (付物明細) の構築
+            # 4. field-91 (付物明細) の構築 ★印刷所フィールドを除外（pop）
             orig_sub_91 = original_rec.get("field-91", [])
             sub91_list = []
             if source_tab == "acc":
@@ -461,11 +459,16 @@ if st.button("💾 チェックを入れたデータを データベース に�
                 if isinstance(orig_sub_91, list) and len(orig_sub_91) > 0:
                     item_91 = copy.deepcopy(orig_sub_91[0])
                     rec_dict_91 = item_91.get("record", {})
+                    
                     rec_dict_91["field-91_1"] = str(row_91["表 日付"]) if pd.notna(row_91["表 日付"]) else ""
                     rec_dict_91["field-91_5"] = str(row_91["カバー 日付"]) if pd.notna(row_91["カバー 日付"]) else ""
                     rec_dict_91["field-91_9"] = str(row_91["カード 日付"]) if pd.notna(row_91["カード 日付"]) else ""
                     rec_dict_91["field-91_13"] = str(row_91["帯 日付"]) if pd.notna(row_91["帯 日付"]) else ""
-                    # 印刷所フィールドは更新しないためそのまま維持
+                    
+                    # 印刷所フィールドを送信データから確実に削除
+                    for k in ["field-91_2", "field-91_6", "field-91_10", "field-91_14"]:
+                        rec_dict_91.pop(k, None)
+                        
                     item_91["record"] = rec_dict_91
                     sub91_list.append(item_91)
                 else:
