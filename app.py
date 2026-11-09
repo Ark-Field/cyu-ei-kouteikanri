@@ -214,11 +214,11 @@ with tab1:
                     item_89 = sub_89[i] if isinstance(sub_89, list) and len(sub_89) > i else {}
                     rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
                     
-                    val_88_11 = rec_88.get("field-88_11", 0)
-                    is_deliv_chk = True if val_88_11 in [1, "1", True, "true", "True"] else False
-
-                    val_89_10 = rec_89.get("field-89_10", 0)
-                    is_inv_chk = True if val_89_10 in [1, "1", True, "true", "True"] else False
+                    # 区分値の安全な取得
+                    val_88_12 = str(rec_88.get("field-88_12", "未"))
+                    val_89_11 = str(rec_89.get("field-89_11", "未"))
+                    val_88_13 = str(rec_88.get("field-88_13", ""))
+                    val_88_10 = str(rec_88.get("field-88_10", ""))
 
                     flat_data.append({
                         "更新": False,
@@ -242,11 +242,13 @@ with tab1:
                         "納品数": str(rec_88.get("field-88_4", "")) if rec_88.get("field-88_4") is not None else "",
                         "PL数": str(rec_88.get("field-88_7", "")) if rec_88.get("field-88_7") is not None else "",
                         "見本数量": str(rec_88.get("field-88_8", "")) if rec_88.get("field-88_8") is not None else "",
-                        "納品チェック": is_deliv_chk,
+                        "配車区分": val_88_10,
+                        "納品区分": val_88_12 if val_88_12 in ["未", "納品", "済"] else "未",
+                        "在庫出荷": val_88_13 if val_88_13 in ["", "在庫から"] else "",
                         # 請求関連 (field-89)
                         "売上日": parse_date_safe(rec_89.get("field-89_1")),
                         "請求数量": str(rec_89.get("field-89_3", "")) if rec_89.get("field-89_3") is not None else "",
-                        "請求チェック": is_inv_chk
+                        "請求区分": val_89_11 if val_89_11 in ["未", "請求", "済"] else "未"
                     })
             
             df_flat = pd.DataFrame(flat_data)
@@ -276,10 +278,12 @@ with tab1:
                     "納品数": st.column_config.TextColumn("納品数", help="納品数（field-88_4）"),
                     "PL数": st.column_config.TextColumn("PL数", help="PL数（field-88_7）"),
                     "見本数量": st.column_config.TextColumn("見本数量", help="見本数量（field-88_8）"),
-                    "納品チェック": st.column_config.CheckboxColumn("納品チェック", help="納品書対象チェック（field-88_11）"),
+                    "配車区分": st.column_config.TextColumn("配車区分", help="配車区分（field-88_10）"),
+                    "納品区分": st.column_config.SelectboxColumn("納品区分", options=["未", "納品", "済"], required=True, help="納品区分（field-88_12）"),
+                    "在庫出荷": st.column_config.SelectboxColumn("在庫出荷", options=["", "在庫から"], help="在庫出荷（field-88_13）"),
                     "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
                     "請求数量": st.column_config.TextColumn("請求数量"),
-                    "請求チェック": st.column_config.CheckboxColumn("請求チェック", help="請求書対象チェック（field-89_10）"),
+                    "請求区分": st.column_config.SelectboxColumn("請求区分", options=["未", "請求", "済"], required=True, help="請求区分（field-89_11）"),
                 }
             )
             
@@ -454,7 +458,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
             else:
                 record_payload["field-90"] = orig_sub_90
 
-            # 2. field-88 (納品明細) の構築（💡 recordSubIdなどの識別子を保持しつつ、納品チェックを更新）
+            # 2. field-88 (納品明細) の構築（配車区分・納品区分・在庫出荷を含める）
             orig_sub_88 = original_rec.get("field-88", [])
             sub88_list = []
             if source_tab == "flat":
@@ -469,8 +473,6 @@ if st.button("💾 チェックを入れたデータを データベース に�
                         if parsed_d:
                             deliv_date_str = parsed_d.strftime("%Y-%m-%d")
 
-                is_deliv_checked = 1 if row_88["納品チェック"] else 0
-
                 if isinstance(orig_sub_88, list) and len(orig_sub_88) > 0:
                     item_88 = copy.deepcopy(orig_sub_88[0])
                     rec_dict_88 = item_88.get("record", {})
@@ -478,9 +480,10 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     rec_dict_88["field-88_4"] = str(row_88["納品数"]) if pd.notna(row_88["納品数"]) else "0"
                     rec_dict_88["field-88_7"] = str(row_88["PL数"]) if pd.notna(row_88["PL数"]) else "0"
                     rec_dict_88["field-88_8"] = str(row_88["見本数量"]) if pd.notna(row_88["見本数量"]) else "0"
-                    rec_dict_88["field-88_11"] = is_deliv_checked
+                    rec_dict_88["field-88_10"] = str(row_88["配車区分"]) if pd.notna(row_88["配車区分"]) else ""
+                    rec_dict_88["field-88_12"] = str(row_88["納品区分"]) if pd.notna(row_88["納品区分"]) else "未"
+                    rec_dict_88["field-88_13"] = str(row_88["在庫出荷"]) if pd.notna(row_88["在庫出荷"]) else ""
                     
-                    # ⚠️ recordSubIdやIdは削除せずそのまま残す（行の識別のため必須）
                     item_88["record"] = rec_dict_88
                     sub88_list.append(item_88)
                 else:
@@ -490,32 +493,31 @@ if st.button("💾 チェックを入れたデータを データベース に�
                             "field-88_4": str(first_row["納品数"]) if pd.notna(first_row["納品数"]) else "0",
                             "field-88_7": str(first_row["PL数"]) if pd.notna(first_row["PL数"]) else "0",
                             "field-88_8": str(first_row["見本数量"]) if pd.notna(first_row["見本数量"]) else "0",
-                            "field-88_11": is_deliv_checked
+                            "field-88_10": str(first_row["配車区分"]) if pd.notna(first_row["配車区分"]) else "",
+                            "field-88_12": str(first_row["納品区分"]) if pd.notna(first_row["納品区分"]) else "未",
+                            "field-88_13": str(first_row["在庫出荷"]) if pd.notna(first_row["在庫出荷"]) else ""
                         }
                     })
                 record_payload["field-88"] = sub88_list
             else:
                 record_payload["field-88"] = orig_sub_88
 
-            # 3. field-89 (請求/売上明細) の構築（💡 recordSubIdなどの識別子を保持しつつ、請求チェックを更新）
+            # 3. field-89 (請求/売上明細) の構築（請求区分を含める）
             orig_sub_89 = original_rec.get("field-89", [])
             sub89_list = []
             if source_tab == "flat":
                 row_89 = first_row
-                is_inv_checked = 1 if row_89["請求チェック"] else 0
-
                 if isinstance(orig_sub_89, list) and len(orig_sub_89) > 0:
                     item_89 = copy.deepcopy(orig_sub_89[0])
                     rec_dict_89 = item_89.get("record", {})
-                    rec_dict_89["field-89_10"] = is_inv_checked
+                    rec_dict_89["field-89_11"] = str(row_89["請求区分"]) if pd.notna(row_89["請求区分"]) else "未"
                     
-                    # ⚠️ recordSubIdやIdは削除せずそのまま残す
                     item_89["record"] = rec_dict_89
                     sub89_list.append(item_89)
                 else:
                     sub89_list.append({
                         "record": {
-                            "field-89_10": is_inv_checked
+                            "field-89_11": str(first_row["請求区分"]) if pd.notna(first_row["請求区分"]) else "未"
                         }
                     })
                 record_payload["field-89"] = sub89_list
@@ -581,11 +583,11 @@ if st.button("💾 チェックを入れたデータを データベース に�
             st.error(f"❌ {fail_count} 件の保存に失敗しました。")
 
 # ==========================================
-# タブ2：納品書発行（field-88ベース ＆ 納品チェック絞り込み）
+# タブ2：納品書発行（field-88ベース ＆ 納品区分「納品」または「済」の絞り込み）
 # ==========================================
 with tab2:
     st.header("📦 納品書発行")
-    st.info("💡 タブ1の明細で**「納品チェック」**にチェックが入れられ、保存されたデータから納品書を作成します。")
+    st.info("💡 タブ1の明細で**「納品区分」**が **「納品」** または **「済」** になっているデータから納品書を作成します。")
     
     raw_deliv_list = sample_rec.get("field-88", []) if 'sample_rec' in locals() else []
     delivery_rows = []
@@ -593,19 +595,19 @@ with tab2:
     if raw_deliv_list:
         for item in raw_deliv_list:
             rec = item.get("record", item) if isinstance(item, dict) else {}
-            val_chk = rec.get("field-88_11", 0)
-            is_deliv = True if val_chk in [1, "1", True, "true", "True"] else False
-            if is_deliv:
+            val_status = str(rec.get("field-88_12", "未"))
+            if val_status in ["納品", "済"]:
                 delivery_rows.append({
                     "納品日": parse_date_safe(rec.get("field-88_2")),
                     "納品数": str(rec.get("field-88_4", "0")),
                     "PL数": str(rec.get("field-88_7", "0")),
                     "見本数量": str(rec.get("field-88_8", "0")),
-                    "配車区分": str(rec.get("field-88_10", ""))
+                    "配車区分": str(rec.get("field-88_10", "")),
+                    "納品区分": val_status
                 })
     
     if not delivery_rows:
-        st.warning("⚠️ 現在選択中の受注データには、「納品チェック」がONになっている明細がありません。\nタブ1の明細一覧で「納品チェック」にチェックを入れ、データベースに保存してから再度ご確認ください。")
+        st.warning("⚠️ 現在選択中の受注データには、納品区分が「納品」または「済」になっている明細がありません。\nタブ1の明細一覧で納品区分を変更し、データベースに保存してから再度ご確認ください。")
     else:
         st.success(f"✨ 納品対象の明細が **{len(delivery_rows)} 件** 検出されました。")
         
@@ -686,11 +688,11 @@ with tab2:
             st.download_button("📥 納品書HTMLファイルをダウンロード", data=html_content.encode("utf-8"), file_name=f"納品書_{field_2 if 'field_2' in locals() else 'd'}.html", mime="text/html")
 
 # ==========================================
-# タブ3：請求書発行（「請求チェック」がONの行のみ自動絞り込み ＆ 口座UI付き）
+# タブ3：請求書発行（請求区分「請求」または「済」の行のみ自動絞り込み ＆ 口座UI付き）
 # ==========================================
 with tab3:
     st.header("📄 請求書発行（口座指定可）")
-    st.info("💡 タブ1の明細で**「請求チェック」**（`field-89_10`）にチェックが入れられ、保存された明細行だけを自動的に絞り込んで請求書を作成します。")
+    st.info("💡 タブ1の明細で**「請求区分」**（`field-89_11`）が **「請求」** または **「済」** になっている明細行だけを自動的に絞り込んで請求書を作成します。")
     
     bc1, bc2, bc3 = st.columns(3)
     with bc1:
@@ -708,16 +710,16 @@ with tab3:
     if raw_sales_list:
         for item in raw_sales_list:
             rec = item.get("record", item) if isinstance(item, dict) else {}
-            val_chk = rec.get("field-89_10", 0)
-            is_inv = True if val_chk in [1, "1", True, "true", "True"] else False
-            if is_inv:
+            val_status = str(rec.get("field-89_11", "未"))
+            if val_status in ["請求", "済"]:
                 invoice_rows.append({
                     "売上日": parse_date_safe(rec.get("field-89_1")),
-                    "請求数量": str(rec.get("field-89_3", "0"))
+                    "請求数量": str(rec.get("field-89_3", "0")),
+                    "請求区分": val_status
                 })
     
     if not invoice_rows:
-        st.warning("⚠️ 現在選択中の受注データには、「請求チェック」がONになっている明細がありません。\nタブ1の明細一覧で「請求チェック」にチェックを入れ、データベースに保存してから再度ご確認ください。")
+        st.warning("⚠️ 現在選択中の受注データには、請求区分が「請求」または「済」になっている明細がありません。\nタブ1の明細一覧で請求区分を変更し、データベースに保存してから再度ご確認ください。")
     else:
         st.success(f"✨ 請求対象の明細が **{len(invoice_rows)} 件** 検出されました。")
         
