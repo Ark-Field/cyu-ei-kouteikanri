@@ -10,7 +10,7 @@ import streamlit as st
 # 1. ページ基本設定
 # ==========================================
 st.set_page_config(page_title="受注一覧表", layout="wide")
-st.title("📊 受注一覧表 ＆ 付物・納品管理システム")
+st.title("📊 受注一覧表 ＆ 付物・納品・請求管理システム")
 
 # ==========================================
 # 2. Secrets設定
@@ -136,10 +136,10 @@ tab1, tab_accessory, tab2, tab3 = st.tabs([
 ])
 
 # ==========================================
-# タブ1：受注一覧表 ＆ 工程日・売上明細（納品日・納請区分含む）エディタ
+# タブ1：受注一覧表 ＆ 工程日・納品・請求明細エディタ
 # ==========================================
 with tab1:
-    st.header("📋 受注一覧表 ＆ 納品・工程管理")
+    st.header("📋 受注一覧表 ＆ 工程・納品・請求管理")
     
     if url_order_no:
         st.success(f"🔗 DBから受注番号 **{url_order_no}** のデータを起動しました！")
@@ -195,15 +195,21 @@ with tab1:
                 h_price = str(r.get("field-5", ""))
                 
                 sub_90 = r.get("field-90", [])
+                sub_88 = r.get("field-88", [])
                 sub_89 = r.get("field-89", [])
                 
                 max_len = max(len(sub_90) if isinstance(sub_90, list) else 0,
+                              len(sub_88) if isinstance(sub_88, list) else 0,
                               len(sub_89) if isinstance(sub_89, list) else 0, 1)
                 
                 for i in range(max_len):
                     item_90 = sub_90[i] if isinstance(sub_90, list) and len(sub_90) > i else {}
                     sub_id_90 = item_90.get("recordSubId", item_90.get("Id", ""))
                     rec_90 = item_90.get("record", item_90) if isinstance(item_90, dict) else {}
+                    
+                    item_88 = sub_88[i] if isinstance(sub_88, list) and len(sub_88) > i else {}
+                    sub_id_88 = item_88.get("recordSubId", item_88.get("Id", ""))
+                    rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
                     
                     item_89 = sub_89[i] if isinstance(sub_89, list) and len(sub_89) > i else {}
                     sub_id_89 = item_89.get("recordSubId", item_89.get("Id", ""))
@@ -213,6 +219,7 @@ with tab1:
                         "更新": False,
                         "_record_idx": record_idx,
                         "_id_90": sub_id_90,
+                        "_id_88": sub_id_88,
                         "_id_89": sub_id_89,
                         "受注番号": h_ord_no,
                         "受注日": h_ord_date,
@@ -220,6 +227,7 @@ with tab1:
                         "書名": h_title,
                         "製本数": h_qty,
                         "単価": h_price,
+                        # 工程日 (field-90)
                         "配本日": parse_date_safe(rec_90.get("field-90_1")),
                         "折本日": parse_date_safe(rec_90.get("field-90_3")),
                         "無線日": parse_date_safe(rec_90.get("field-90_4")),
@@ -227,10 +235,17 @@ with tab1:
                         "仕上日": parse_date_safe(rec_90.get("field-90_6")),
                         "チェック": bool(rec_90.get("field-90_7", False)),
                         "備考": str(rec_90.get("field-90_9", "")),
-                        "納品日": parse_date_safe(rec_89.get("field-89_9")),   # 💡 売上日の左側に配置
-                        "納請区分": bool(rec_89.get("field-89_10", False)), # 💡 売上日の左側に配置（チェックボックス）
+                        # 納品関連 (field-88)
+                        "納品日": parse_date_safe(rec_88.get("field-88_2")),
+                        "納品数": str(rec_88.get("field-88_4", "")),
+                        "PL数": str(rec_88.get("field-88_7", "")),
+                        "見本数量": str(rec_88.get("field-88_8", "")),
+                        "配車区分": str(rec_88.get("field-88_10", "A便")),
+                        "納品チェック": bool(rec_88.get("field-88_11", False)),
+                        # 請求関連 (field-89)
                         "売上日": parse_date_safe(rec_89.get("field-89_1")),
-                        "請求数量": str(rec_89.get("field-89_3", ""))
+                        "請求数量": str(rec_89.get("field-89_3", "")),
+                        "請求チェック": bool(rec_89.get("field-89_10", False))
                     })
             
             df_flat = pd.DataFrame(flat_data)
@@ -244,6 +259,7 @@ with tab1:
                     "更新": st.column_config.CheckboxColumn("更新チェック", required=True, help="チェックを入れた行のデータを@pocketに上書き保存します"),
                     "_record_idx": None,
                     "_id_90": None,
+                    "_id_88": None,
                     "_id_89": None,
                     "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
                     "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD", disabled=True),
@@ -258,10 +274,15 @@ with tab1:
                     "仕上日": st.column_config.DateColumn("仕上日", format="YYYY-MM-DD"),
                     "チェック": st.column_config.CheckboxColumn("チェック"),
                     "備考": st.column_config.TextColumn("備考"),
-                    "納品日": st.column_config.DateColumn("納品日", format="YYYY-MM-DD", help="納品日（field-89_9）"),
-                    "納請区分": st.column_config.CheckboxColumn("納請区分", help="チェック：納品 / 未チェック：請求 (field-89_10)"),
+                    "納品日": st.column_config.DateColumn("納品日", format="YYYY-MM-DD", help="納品日（field-88_2）"),
+                    "納品数": st.column_config.TextColumn("納品数", help="納品数（field-88_4）"),
+                    "PL数": st.column_config.TextColumn("PL数", help="PL数（field-88_7）"),
+                    "見本数量": st.column_config.TextColumn("見本数量", help="見本数量（field-88_8）"),
+                    "配車区分": st.column_config.SelectboxColumn("配車区分", options=["A便", "B便", "自社便", "宅急便"], help="配車区分（field-88_10）"),
+                    "納品チェック": st.column_config.CheckboxColumn("納品チェック", help="納品書対象チェック（field-88_11）"),
                     "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
-                    "請求数量": st.column_config.TextColumn("請求数量", disabled=True),
+                    "請求数量": st.column_config.TextColumn("請求数量"),
+                    "請求チェック": st.column_config.CheckboxColumn("請求チェック", help="請求書対象チェック（field-89_10）"),
                 }
             )
             
@@ -381,6 +402,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
         
         grouped_records = checked_rows.groupby("_record_idx")
         
+        import copy
         for r_idx, group_df in grouped_records:
             r_idx = int(r_idx)
             original_rec = api_records[r_idx]
@@ -400,8 +422,6 @@ if st.button("💾 チェックを入れたデータを データベース に�
                 "field-4": str(original_rec.get("field-4", "")),
                 "field-5": str(original_rec.get("field-5", "")),
             }
-            
-            import copy
             
             # 1. field-90 の構築
             orig_sub_90 = original_rec.get("field-90", [])
@@ -437,7 +457,38 @@ if st.button("💾 チェックを入れたデータを データベース に�
             else:
                 record_payload["field-90"] = orig_sub_90
 
-            # 2. field-89 (売上/仕入・納品日・納請区分) の構築
+            # 2. field-88 (納品明細) の構築
+            orig_sub_88 = original_rec.get("field-88", [])
+            sub88_list = []
+            if source_tab == "flat":
+                row_88 = first_row
+                if isinstance(orig_sub_88, list) and len(orig_sub_88) > 0:
+                    item_88 = copy.deepcopy(orig_sub_88[0])
+                    rec_dict_88 = item_88.get("record", {})
+                    rec_dict_88["field-88_2"] = str(row_88["納品日"]) if pd.notna(row_88["納品日"]) else ""
+                    rec_dict_88["field-88_4"] = str(row_88["納品数"]) if pd.notna(row_88["納品数"]) else ""
+                    rec_dict_88["field-88_7"] = str(row_88["PL数"]) if pd.notna(row_88["PL数"]) else ""
+                    rec_dict_88["field-88_8"] = str(row_88["見本数量"]) if pd.notna(row_88["見本数量"]) else ""
+                    rec_dict_88["field-88_10"] = str(row_88["配車区分"]) if pd.notna(row_88["配車区分"]) else ""
+                    rec_dict_88["field-88_11"] = bool(row_88["納品チェック"])
+                    item_88["record"] = rec_dict_88
+                    sub88_list.append(item_88)
+                else:
+                    sub88_list.append({
+                        "record": {
+                            "field-88_2": str(first_row["納品日"]) if pd.notna(first_row["納品日"]) else "",
+                            "field-88_4": str(first_row["納品数"]) if pd.notna(first_row["納品数"]) else "",
+                            "field-88_7": str(first_row["PL数"]) if pd.notna(first_row["PL数"]) else "",
+                            "field-88_8": str(first_row["見本数量"]) if pd.notna(first_row["見本数量"]) else "",
+                            "field-88_10": str(first_row["配車区分"]) if pd.notna(first_row["配車区分"]) else "",
+                            "field-88_11": bool(first_row["納品チェック"])
+                        }
+                    })
+                record_payload["field-88"] = sub88_list
+            else:
+                record_payload["field-88"] = orig_sub_88
+
+            # 3. field-89 (請求/売上明細) の構築
             orig_sub_89 = original_rec.get("field-89", [])
             sub89_list = []
             if source_tab == "flat":
@@ -445,22 +496,20 @@ if st.button("💾 チェックを入れたデータを データベース に�
                 if isinstance(orig_sub_89, list) and len(orig_sub_89) > 0:
                     item_89 = copy.deepcopy(orig_sub_89[0])
                     rec_dict_89 = item_89.get("record", {})
-                    rec_dict_89["field-89_9"] = str(row_89["納品日"]) if pd.notna(row_89["納品日"]) else ""
-                    rec_dict_89["field-89_10"] = bool(row_89["納請区分"])
+                    rec_dict_89["field-89_10"] = bool(row_89["請求チェック"])
                     item_89["record"] = rec_dict_89
                     sub89_list.append(item_89)
                 else:
                     sub89_list.append({
                         "record": {
-                            "field-89_9": str(first_row["納品日"]) if pd.notna(first_row["納品日"]) else "",
-                            "field-89_10": bool(first_row["納請区分"])
+                            "field-89_10": bool(first_row["請求チェック"])
                         }
                     })
                 record_payload["field-89"] = sub89_list
             else:
                 record_payload["field-89"] = orig_sub_89
 
-            # 3. field-91 (付物明細) の構築
+            # 4. field-91 (付物明細) の構築
             orig_sub_91 = original_rec.get("field-91", [])
             sub91_list = []
             if source_tab == "acc":
@@ -522,27 +571,30 @@ if st.button("💾 チェックを入れたデータを データベース に�
             st.error(f"❌ {fail_count} 件の保存に失敗しました。")
 
 # ==========================================
-# タブ2：納品書発行（タブ1の納品チェックを自動反映）
+# タブ2：納品書発行（field-88ベース ＆ 納品チェック絞り込み）
 # ==========================================
 with tab2:
     st.header("📦 納品書発行")
-    st.info("💡 タブ1の明細で**「納請区分」にチェック**が入れられ、データベースに保存されたデータから、納品対象の行を自動で絞り込んで納品書を作成します。")
+    st.info("💡 タブ1の明細で**「納品チェック」**にチェックが入れられ、保存されたデータから納品書を作成します。")
     
-    raw_sales_list = sample_rec.get("field-89", []) if 'sample_rec' in locals() else []
+    raw_deliv_list = sample_rec.get("field-88", []) if 'sample_rec' in locals() else []
     delivery_rows = []
     
-    if raw_sales_list:
-        for item in raw_sales_list:
+    if raw_deliv_list:
+        for item in raw_deliv_list:
             rec = item.get("record", item) if isinstance(item, dict) else {}
-            is_delivery = bool(rec.get("field-89_10", False))
-            if is_delivery:
+            is_deliv = bool(rec.get("field-88_11", False))
+            if is_deliv:
                 delivery_rows.append({
-                    "納品日": parse_date_safe(rec.get("field-89_9")),
-                    "請求数量": str(rec.get("field-89_3", "0"))
+                    "納品日": parse_date_safe(rec.get("field-88_2")),
+                    "納品数": str(rec.get("field-88_4", "0")),
+                    "PL数": str(rec.get("field-88_7", "0")),
+                    "見本数量": str(rec.get("field-88_8", "0")),
+                    "配車区分": str(rec.get("field-88_10", ""))
                 })
     
     if not delivery_rows:
-        st.warning("⚠️ 現在選択中の受注データには、納請区分が「納品」にチェックされている明細がありません。\nタブ1の明細一覧で対象行にチェックを入れ、データベースに保存してから再度ご確認ください。")
+        st.warning("⚠️ 現在選択中の受注データには、「納品チェック」がONになっている明細がありません。\nタブ1の明細一覧で「納品チェック」にチェックを入れ、データベースに保存してから再度ご確認ください。")
     else:
         st.success(f"✨ 納品対象の明細が **{len(delivery_rows)} 件** 検出されました。")
         
@@ -585,19 +637,28 @@ with tab2:
                     <tr>
                         <th>納品日</th>
                         <th>品名 (書名)</th>
+                        <th>配車区分</th>
                         <th class="right">納品数</th>
+                        <th class="right">PL数</th>
+                        <th class="right">見本数</th>
                     </tr>
             """
             for row in delivery_rows:
                 d_date = str(row["納品日"]) if pd.notna(row["納品日"]) else ""
                 d_name = f"{field_13}" if 'field_13' in locals() else "本書"
-                d_qty = row["請求数量"]
+                d_car = row["配車区分"]
+                d_qty = row["納品数"]
+                d_pl = row["PL数"]
+                d_sample = row["見本数量"]
                 
                 html_content += f"""
                     <tr>
                         <td>{d_date}</td>
                         <td>{d_name}</td>
+                        <td>{d_car}</td>
                         <td class="right">{d_qty} 部</td>
+                        <td class="right">{d_pl} PL</td>
+                        <td class="right">{d_sample} 部</td>
                     </tr>
                 """
             html_content += f"""
@@ -614,11 +675,11 @@ with tab2:
             st.download_button("📥 納品書HTMLファイルをダウンロード", data=html_content.encode("utf-8"), file_name=f"納品書_{field_2 if 'field_2' in locals() else 'd'}.html", mime="text/html")
 
 # ==========================================
-# タブ3：請求書発行（口座UI付き）
+# タブ3：請求書発行（「請求チェック」がONの行のみ自動絞り込み ＆ 口座UI付き）
 # ==========================================
 with tab3:
-    st.header("📄 請求書発行（口座UI付き）")
-    st.info("💡 振込先口座情報を入力し、請求明細を確認してプレビュー・印刷（PDF化）を行えます。")
+    st.header("📄 請求書発行（口座指定可）")
+    st.info("💡 タブ1の明細で**「請求チェック」**（`field-89_10`）にチェックが入れられ、保存された明細行だけを自動的に絞り込んで請求書を作成します。")
     
     bc1, bc2, bc3 = st.columns(3)
     with bc1:
@@ -631,118 +692,114 @@ with tab3:
         bank_holder = st.text_input("口座名義", value="カ）チュウエイセイホンジョ", key="b_holder")
 
     raw_sales_list = sample_rec.get("field-89", []) if 'sample_rec' in locals() else []
-    sales_table_data = []
+    invoice_rows = []
     
     if raw_sales_list:
         for item in raw_sales_list:
             rec = item.get("record", item) if isinstance(item, dict) else {}
-            sales_table_data.append({
-                "売上日": parse_date_safe(rec.get("field-89_1")),
-                "請求数量": rec.get("field-89_3", "0")
-            })
-    else:
-        sales_table_data = [{"売上日": None, "請求数量": "0"}]
-        
-    df_sales = pd.DataFrame(sales_table_data)
-    edited_sales = st.data_editor(
-        df_sales,
-        num_rows="dynamic",
-        key="editor_sales_clean",
-        use_container_width=True,
-        column_config={
-            "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
-            "請求数量": st.column_config.TextColumn("請求数量")
-        }
-    )
+            is_inv = bool(rec.get("field-89_10", False))  # 💡 請求チェックがTrueのものだけを抽出
+            if is_inv:
+                invoice_rows.append({
+                    "売上日": parse_date_safe(rec.get("field-89_1")),
+                    "請求数量": str(rec.get("field-89_3", "0"))
+                })
     
-    if st.button("🚀 請求書プレビュー / 印刷（PDF）を作成", type="primary", key="btn_pdf_invoice"):
-        try:
-            unit_price = float(field_5) if 'field_5' in locals() else 0
-        except ValueError:
-            unit_price = 0
-            
-        total_qty = 0
-        for _, row in edited_sales.iterrows():
-            q_str = str(row["請求数量"])
-            if q_str.isdigit():
-                total_qty += int(q_str)
-                
-        total_amount = total_qty * unit_price
-            
-        inv_html = f"""
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <style>
-                body {{ font-family: 'Helvetica Neue', Arial, sans-serif; padding: 30px; color: #333; }}
-                h1 {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; }}
-                .meta {{ display: flex; justify-content: space-between; margin-bottom: 20px; }}
-                table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
-                th, td {{ border: 1px solid #ddd; padding: 10px; text-align: left; }}
-                th {{ background-color: #f2f2f2; }}
-                .right {{ text-align: right; }}
-                .box {{ border: 1px solid #333; padding: 15px; margin-top: 20px; background-color: #f9f9f9; width: 350px; }}
-                @media print {{
-                    body {{ padding: 0; }}
-                    .no-print {{ display: none; }}
-                }}
-            </style>
-        </head>
-        <body>
-            <h1>請 求 書</h1>
-            <div class="meta">
-                <div>
-                    <p><strong>宛先:</strong> {field_8 if 'field_8' in locals() else ''} 御中</p>
-                    <p><strong>件名 (書名):</strong> {field_13 if 'field_13' in locals() else ''}</p>
-                    <p><strong>受注番号:</strong> {field_2 if 'field_2' in locals() else ''} / <strong>受注日:</strong> {field_1 if 'field_1' in locals() else ''}</p>
-                </div>
-                <div>
-                    <p><strong>発行日:</strong> {datetime.now().strftime('%Y-%m-%d')}</p>
-                </div>
-            </div>
-            
-            <table>
-                <tr>
-                    <th>売上日 / 対象</th>
-                    <th class="right">請求数量</th>
-                    <th class="right">単価</th>
-                    <th class="right">金額</th>
-                </tr>
-        """
-        for _, row in edited_sales.iterrows():
-            s_date = str(row["売上日"]) if pd.notna(row["売上日"]) else ""
-            s_qty = row["請求数量"]
+    if not invoice_rows:
+        st.warning("⚠️ 現在選択中の受注データには、「請求チェック」がONになっている明細がありません。\nタブ1の明細一覧で「請求チェック」にチェックを入れ、データベースに保存してから再度ご確認ください。")
+    else:
+        st.success(f"✨ 請求対象の明細が **{len(invoice_rows)} 件** 検出されました。")
+        
+        df_inv_preview = pd.DataFrame(invoice_rows)
+        st.dataframe(df_inv_preview, use_container_width=True)
+        
+        if st.button("🚀 請求書プレビュー / 印刷（PDF）を作成", type="primary", key="btn_pdf_invoice"):
             try:
-                q_num = int(s_qty) if str(s_qty).isdigit() else 0
+                unit_price = float(field_5) if 'field_5' in locals() else 0
             except ValueError:
-                q_num = 0
-            sub_total = q_num * unit_price
-            inv_html += f"""
-                <tr>
-                    <td>{s_date} 分売上</td>
-                    <td class="right">{q_num} 部</td>
-                    <td class="right">¥{unit_price:,.2f}</td>
-                    <td class="right">¥{sub_total:,.2f}</td>
-                </tr>
+                unit_price = 0
+                
+            total_qty = 0
+            for row in invoice_rows:
+                q_str = str(row["請求数量"])
+                if q_str.isdigit():
+                    total_qty += int(q_str)
+                    
+            total_amount = total_qty * unit_price
+                
+            inv_html = f"""
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <style>
+                    body {{ font-family: 'Helvetica Neue', Arial, sans-serif; padding: 30px; color: #333; }}
+                    h1 {{ text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; }}
+                    .meta {{ display: flex; justify-content: space-between; margin-bottom: 20px; }}
+                    table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+                    th, td {{ border: 1px solid #ddd; padding: 10px; text-align: left; }}
+                    th {{ background-color: #f2f2f2; }}
+                    .right {{ text-align: right; }}
+                    .box {{ border: 1px solid #333; padding: 15px; margin-top: 20px; background-color: #f9f9f9; width: 350px; }}
+                    @media print {{
+                        body {{ padding: 0; }}
+                        .no-print {{ display: none; }}
+                    }}
+                </style>
+            </head>
+            <body>
+                <h1>請 求 書</h1>
+                <div class="meta">
+                    <div>
+                        <p><strong>宛先:</strong> {field_8 if 'field_8' in locals() else ''} 御中</p>
+                        <p><strong>件名 (書名):</strong> {field_13 if 'field_13' in locals() else ''}</p>
+                        <p><strong>受注番号:</strong> {field_2 if 'field_2' in locals() else ''} / <strong>受注日:</strong> {field_1 if 'field_1' in locals() else ''}</p>
+                    </div>
+                    <div>
+                        <p><strong>発行日:</strong> {datetime.now().strftime('%Y-%m-%d')}</p>
+                    </div>
+                </div>
+                
+                <table>
+                    <tr>
+                        <th>売上日 / 対象</th>
+                        <th class="right">請求数量</th>
+                        <th class="right">単価</th>
+                        <th class="right">金額</th>
+                    </tr>
             """
-        inv_html += f"""
-            </table>
-            
-            <h2 style="text-align: right; margin-top: 20px;">ご請求金額合計: ￥{total_amount:,.2f} (税込)</h2>
-            
-            <div class="box">
-                <b>【お振込先口座】</b><br>
-                {bank_name} {bank_branch} ({bank_type}) {bank_account}<br>
-                口座名義: {bank_holder}
-            </div>
-            
-            <br>
-            <div class="no-print" style="text-align: center; margin-top: 20px;">
-                <button onclick="window.print();" style="padding: 10px 20px; font-size: 16px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ この請求書を印刷 / PDF保存する</button>
-            </div>
-        </body>
-        </html>
-        """
-        st.success("請求書が生成されました！画面上のプレビュー、または印刷ボタンからPDFとして保存できます。")
-        st.components.v1.html(inv_html, height=600, scrolling=True, key="preview_invoice_html")
-        st.download_button("📥 請求書HTMLファイルをダウンロード", data=inv_html.encode("utf-8"), file_name=f"請求書_{field_2 if 'field_2' in locals() else 'i'}.html", mime="text/html", key="download_invoice_html")
+            for row in invoice_rows:
+                s_date = str(row["売上日"]) if pd.notna(row["売上日"]) else ""
+                s_qty = row["請求数量"]
+                try:
+                    q_num = int(s_qty) if str(s_qty).isdigit() else 0
+                except ValueError:
+                    q_num = 0
+                sub_total = q_num * unit_price
+                inv_html += f"""
+                    <tr>
+                        <td>{s_date} 分売上</td>
+                        <td class="right">{q_num} 部</td>
+                        <td class="right">¥{unit_price:,.2f}</td>
+                        <td class="right">¥{sub_total:,.2f}</td>
+                    </tr>
+                """
+            inv_html += f"""
+                </table>
+                
+                <h2 style="text-align: right; margin-top: 20px;">ご請求金額合計: ￥{total_amount:,.2f} (税込)</h2>
+                
+                <div class="box">
+                    <b>【お振込先口座】</b><br>
+                    {bank_name} {bank_branch} ({bank_type}) {bank_account}<br>
+                    口座名義: {bank_holder}
+                </div>
+                
+                <br>
+                <div class="no-print" style="text-align: center; margin-top: 20px;">
+                    <button onclick="window.print();" style="padding: 10px 20px; font-size: 16px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ この請求書を印刷 / PDF保存する</button>
+                </div>
+            </body>
+            </html>
+            """
+            st.success("請求書が生成されました！画面上のプレビュー、または印刷ボタンからPDFとして保存できます。")
+            st.components.v1.html(inv_html, height=600, scrolling=True, key="preview_invoice_html")
+            st.download_button("📥 請求書HTMLファイルをダウンロード", data=inv_html.encode("utf-8"), file_name=f"請求書_{field_2 if 'field_2' in locals() else 'i'}.html", mime="text/html", key="download_invoice_html")
