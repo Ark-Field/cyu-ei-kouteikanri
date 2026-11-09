@@ -10,7 +10,7 @@ import streamlit as st
 # 1. ページ基本設定
 # ==========================================
 st.set_page_config(page_title="受注一覧表", layout="wide")
-st.title("📊 受注一覧表 ＆ 付物管理システム")
+st.title("📊 受注一覧表 ＆ 付物・納品管理システム")
 
 # ==========================================
 # 2. Secrets設定
@@ -195,21 +195,15 @@ with tab1:
                 h_price = str(r.get("field-5", ""))
                 
                 sub_90 = r.get("field-90", [])
-                sub_88 = r.get("field-88", [])
                 sub_89 = r.get("field-89", [])
                 
                 max_len = max(len(sub_90) if isinstance(sub_90, list) else 0,
-                              len(sub_88) if isinstance(sub_88, list) else 0,
                               len(sub_89) if isinstance(sub_89, list) else 0, 1)
                 
                 for i in range(max_len):
                     item_90 = sub_90[i] if isinstance(sub_90, list) and len(sub_90) > i else {}
                     sub_id_90 = item_90.get("recordSubId", item_90.get("Id", ""))
                     rec_90 = item_90.get("record", item_90) if isinstance(item_90, dict) else {}
-                    
-                    item_88 = sub_88[i] if isinstance(sub_88, list) and len(sub_88) > i else {}
-                    sub_id_88 = item_88.get("recordSubId", item_88.get("Id", ""))
-                    rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
                     
                     item_89 = sub_89[i] if isinstance(sub_89, list) and len(sub_89) > i else {}
                     sub_id_89 = item_89.get("recordSubId", item_89.get("Id", ""))
@@ -219,7 +213,6 @@ with tab1:
                         "更新": False,
                         "_record_idx": record_idx,
                         "_id_90": sub_id_90,
-                        "_id_88": sub_id_88,
                         "_id_89": sub_id_89,
                         "受注番号": h_ord_no,
                         "受注日": h_ord_date,
@@ -234,8 +227,6 @@ with tab1:
                         "仕上日": parse_date_safe(rec_90.get("field-90_6")),
                         "チェック": bool(rec_90.get("field-90_7", False)),
                         "備考": str(rec_90.get("field-90_9", "")),
-                        "納品日": parse_date_safe(rec_88.get("field-88_2")),
-                        "納品数": str(rec_88.get("field-88_4", "")),
                         "売上日": parse_date_safe(rec_89.get("field-89_1")),
                         "請求数量": str(rec_89.get("field-89_3", ""))
                     })
@@ -251,7 +242,6 @@ with tab1:
                     "更新": st.column_config.CheckboxColumn("更新チェック", required=True, help="チェックを入れた行の受注データを@pocketに上書き保存します"),
                     "_record_idx": None,
                     "_id_90": None,
-                    "_id_88": None,
                     "_id_89": None,
                     "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
                     "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD", disabled=True),
@@ -266,8 +256,6 @@ with tab1:
                     "仕上日": st.column_config.DateColumn("仕上日", format="YYYY-MM-DD"),
                     "チェック": st.column_config.CheckboxColumn("チェック"),
                     "備考": st.column_config.TextColumn("備考"),
-                    "納品日": st.column_config.DateColumn("納品日", format="YYYY-MM-DD"),
-                    "納品数": st.column_config.TextColumn("納品数"),
                     "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
                     "請求数量": st.column_config.TextColumn("請求数量"),
                 }
@@ -286,7 +274,7 @@ with tab1:
             field_4 = str(selected_rows.iloc[0]["製本数"])
             field_5 = str(selected_rows.iloc[0]["単価"])
             
-            st.info(f"📌 現在選択中のレコード: **受注番号 {field_2} ({field_13})** （付物タブや納品書・請求書発行に連動しています）")
+            st.info(f"📌 現在選択中のレコード: **受注番号 {field_2} ({field_13})** （納品書・請求書発行に連動しています）")
                 
         else:
             st.warning("⚠️ 該当するレコードが見つかりませんでした。")
@@ -445,13 +433,10 @@ if st.button("💾 チェックを入れたデータを データベース に�
             else:
                 record_payload["field-90"] = orig_sub_90
 
-            # 2. field-88 (納品) の維持
-            record_payload["field-88"] = original_rec.get("field-88", [])
-
-            # 3. field-89 (売上) の維持
+            # 2. field-89 (売上/仕入) の維持
             record_payload["field-89"] = original_rec.get("field-89", [])
 
-            # 4. field-91 (付物明細) の構築 ★印刷所フィールドを除外（pop）
+            # 3. field-91 (付物明細) の構築
             orig_sub_91 = original_rec.get("field-91", [])
             sub91_list = []
             if source_tab == "acc":
@@ -465,7 +450,6 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     rec_dict_91["field-91_9"] = str(row_91["カード 日付"]) if pd.notna(row_91["カード 日付"]) else ""
                     rec_dict_91["field-91_13"] = str(row_91["帯 日付"]) if pd.notna(row_91["帯 日付"]) else ""
                     
-                    # 印刷所フィールドを送信データから確実に削除
                     for k in ["field-91_2", "field-91_6", "field-91_10", "field-91_14"]:
                         rec_dict_91.pop(k, None)
                         
@@ -514,40 +498,42 @@ if st.button("💾 チェックを入れたデータを データベース に�
             st.error(f"❌ {fail_count} 件の保存に失敗しました。")
 
 # ==========================================
-# タブ2：納品書発行
+# タブ2：納品書発行（売上/仕入明細 field-89 ベース）
 # ==========================================
 with tab2:
-    st.header("📦 納品書発行")
-    st.info("💡 選択中の受注データの納品情報を確認し、印刷用プレビュー（PDF出力対応）を表示します。")
+    st.header("📦 納品書発行（売上/仕入明細連動）")
+    st.info("💡 選択中の受注データにおける『売上/仕入明細（field-89）』の納品日・納請区分を確認・編集して、納品書を作成できます。")
     
-    raw_deliv_list = sample_rec.get("field-88", []) if 'sample_rec' in locals() else []
+    raw_sales_list = sample_rec.get("field-89", []) if 'sample_rec' in locals() else []
     deliv_table_data = []
     
-    if raw_deliv_list:
-        for item in raw_deliv_list:
+    if raw_sales_list:
+        for item in raw_sales_list:
             rec = item.get("record", item) if isinstance(item, dict) else {}
             deliv_table_data.append({
-                "納品日": parse_date_safe(rec.get("field-88_2")),
-                "品名": rec.get("field-88_3", "本書"),
-                "納品数": rec.get("field-88_4", "0")
+                "納品日": parse_date_safe(rec.get("field-89_9")),
+                "納請区分": bool(rec.get("field-89_10", False)),
+                "請求数量": str(rec.get("field-89_3", "0")),
+                "売上日": parse_date_safe(rec.get("field-89_1"))
             })
     else:
-        deliv_table_data = [{"納品日": None, "品名": "本書", "納品数": "0"}]
+        deliv_table_data = [{"納品日": None, "納請区分": False, "請求数量": "0", "売上日": None}]
     
     df_deliv = pd.DataFrame(deliv_table_data)
     edited_deliv = st.data_editor(
         df_deliv,
         num_rows="dynamic",
-        key="editor_deliv_clean",
+        key="editor_deliv_sales_base",
         use_container_width=True,
         column_config={
-            "納品日": st.column_config.DateColumn("納品日", format="YYYY-MM-DD"),
-            "品名": st.column_config.TextColumn("品名"),
-            "納品数": st.column_config.TextColumn("納品数")
+            "納品日": st.column_config.DateColumn("納品日", format="YYYY-MM-DD", help="納品日（field-89_9）"),
+            "納請区分": st.column_config.CheckboxColumn("納請区分", help="チェック：納品 / 未チェック：請求 (field-89_10)"),
+            "請求数量": st.column_config.TextColumn("数量 (請求数量)", disabled=True),
+            "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD", disabled=True)
         }
     )
     
-    if st.button("🚀 納品書プレビュー / 印刷（PDF）を作成", type="primary", key="btn_pdf_deliv"):
+    if st.button("🚀 納品書プレビュー / 印刷（PDF）を作成", type="primary", key="btn_pdf_deliv_sales"):
         html_content = f"""
         <html>
         <head>
@@ -570,8 +556,9 @@ with tab2:
             <h1>納 品 書</h1>
             <div class="meta">
                 <div>
-                    <p><strong>宛先:</strong> {field_8 if 'field_8' in locals() else ''} 御中</p>
+                    <p><strong>宛先 (顧客名):</strong> {field_8 if 'field_8' in locals() else ''} 御中</p>
                     <p><strong>受注番号:</strong> {field_2 if 'field_2' in locals() else ''} / <strong>受注日:</strong> {field_1 if 'field_1' in locals() else ''}</p>
+                    <p><strong>書名 (件名):</strong> {field_13 if 'field_13' in locals() else ''}</p>
                 </div>
                 <div>
                     <p><strong>発行日:</strong> {datetime.now().strftime('%Y-%m-%d')}</p>
@@ -582,17 +569,22 @@ with tab2:
                 <tr>
                     <th>納品日</th>
                     <th>品名 (書名)</th>
+                    <th>区分</th>
                     <th class="right">納品数</th>
                 </tr>
         """
         for _, row in edited_deliv.iterrows():
+            # 納請区分がチェックされている（納品）行のみ、またはすべてを対象にする場合はここでフィルタリング可能
             d_date = str(row["納品日"]) if pd.notna(row["納品日"]) else ""
-            d_name = f"{field_13} ({row['品名']})" if 'field_13' in locals() else row['品名']
-            d_qty = row["納品数"]
+            d_name = f"{field_13}" if 'field_13' in locals() else "本書"
+            d_kubun = "納品" if row["納請区分"] else "請求"
+            d_qty = row["請求数量"]
+            
             html_content += f"""
                 <tr>
                     <td>{d_date}</td>
                     <td>{d_name}</td>
+                    <td>{d_kubun}</td>
                     <td class="right">{d_qty} 部</td>
                 </tr>
             """
