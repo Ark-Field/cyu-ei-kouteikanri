@@ -153,7 +153,7 @@ def to_excel_bytes(df):
     output.seek(0)
     return output
 
-# --- 受注一覧表のPDF生成（書名幅を広く・不要項目を除外） ---
+# --- 受注一覧表のPDF生成（渡されたDataFrameの並び順を完全に維持して描画） ---
 def generate_order_pdf(df):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=15, rightMargin=15, topMargin=15, bottomMargin=15)
@@ -174,10 +174,10 @@ def generate_order_pdf(df):
     target_cols = [c for c in df.columns if c not in exclude_cols]
 
     table_data = [[Paragraph(c, header_style) for c in target_cols]]
+    # df.iterrows() は渡されたデータフレームの現在の並び順（ソート・変更後）をそのまま維持します
     for _, row in df.iterrows():
         table_data.append([Paragraph(str(row[c]) if pd.notna(row[c]) else "", cell_style) for c in target_cols])
 
-    # 書名列（約18文字分の広さ）を考慮したカラム幅の配分
     total_width = 812
     num_cols = len(target_cols)
     col_w = total_width / num_cols
@@ -207,7 +207,7 @@ def generate_order_pdf(df):
     buffer.seek(0)
     return buffer
 
-# --- 付物明細一覧表のPDF生成 ---
+# --- 付物明細一覧表のPDF生成（渡されたDataFrameの並び順を維持） ---
 def generate_accessory_pdf(df):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
@@ -246,7 +246,7 @@ def generate_accessory_pdf(df):
     buffer.seek(0)
     return buffer
 
-# --- 納品書PDF生成（1ページ1件で改ページ・A4横） ---
+# --- 納品書PDF生成 ---
 def generate_delivery_pdf(grouped_deliv_dict):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=25, rightMargin=25, topMargin=25, bottomMargin=25)
@@ -317,7 +317,7 @@ def generate_delivery_pdf(grouped_deliv_dict):
     buffer.seek(0)
     return buffer
 
-# --- 請求書PDF生成（1ページ1件で改ページ・A4縦） ---
+# --- 請求書PDF生成 ---
 def generate_invoice_pdf(grouped_invoice_dict, bank_info):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=portrait(A4), leftMargin=25, rightMargin=25, topMargin=25, bottomMargin=25)
@@ -446,7 +446,7 @@ def generate_invoice_pdf(grouped_invoice_dict, bank_info):
     return buffer
 
 # ==========================================
-# 5. URLパラメータのチェック ＆ 期間クエリ対応のデータ取得関数
+# 5. URLパラメータのチェック ＆ データ取得関数
 # ==========================================
 query_params = st.query_params
 url_order_no = query_params.get("ord", None)
@@ -613,7 +613,7 @@ with tab1:
                     h_due = parse_date_safe(r.get("field-52"))
                     h_pub = clean_val(r.get("field-8", ""))
                     h_title = clean_val(r.get("field-13", ""))
-                    h_isbn = clean_val(r.get("field-93", ""))  # ISBN (field-93)
+                    h_isbn = clean_val(r.get("field-93", ""))
                     h_qty = clean_val(r.get("field-4", ""))
                     h_price = clean_val(r.get("field-5", ""))
                     
@@ -649,7 +649,7 @@ with tab1:
                             "納期": h_due,
                             "出版社名": h_pub,
                             "書名": h_title,
-                            "ISBN": h_isbn,  # ISBNを追加
+                            "ISBN": h_isbn,
                             "製本数": h_qty,
                             "単価": h_price,
                             "折本日": parse_date_safe(rec_90.get("field-90_3")),
@@ -672,7 +672,13 @@ with tab1:
                             "備考_請求": clean_val(rec_89.get("field-89_7", "")),
                             "請求": False
                         })
-                st.session_state["df_flat_session"] = pd.DataFrame(flat_data)
+                
+                df_temp = pd.DataFrame(flat_data)
+                # 【ポイント】デフォルトで「納期」の昇順にソート（納期がないものは末尾へ）
+                if "納期" in df_temp.columns:
+                    df_temp = df_temp.sort_values(by="納期", ascending=True, na_position="last").reset_index(drop=True)
+                
+                st.session_state["df_flat_session"] = df_temp
                 st.session_state["last_len"] = len(api_records)
 
             # --- 一括選択・解除ボタン ---
@@ -744,6 +750,7 @@ with tab1:
             col_dl1, col_dl2 = st.columns(2)
             with col_dl1:
                 exclude_for_dl = ["単価", "納品日", "PL数", "見本数量", "配車区分", "納品", "在庫出荷", "売上日", "請求数量", "内見本数量"]
+                # 画面エディタで並び替えや編集が行われた現在の順番（edited_flat_df）をそのままExcel出力に反映
                 df_excel_export = edited_flat_df.drop(columns=[c for c in exclude_for_dl if c in edited_flat_df.columns])
                 excel_bytes_ord = to_excel_bytes(df_excel_export)
                 st.download_button(
@@ -754,6 +761,7 @@ with tab1:
                     key="dl_excel_order"
                 )
             with col_dl2:
+                # 画面エディタの現在の並び順（edited_flat_df）をそのままPDF出力に反映
                 pdf_bytes_ord = generate_order_pdf(edited_flat_df)
                 st.download_button(
                     label="🖨️ 受注一覧表を PDF でダウンロード",
@@ -798,8 +806,8 @@ with tab_accessory:
         acc_flat_data = []
         for record_idx, r in enumerate(api_records):
             h_ord_no = clean_val(r.get("field-2", ""))
-            h_ord_date = parse_date_safe(r.get("field-1"))  # 受注日を追加
-            h_due = parse_date_safe(r.get("field-52"))       # 納期を追加
+            h_ord_date = parse_date_safe(r.get("field-1"))
+            h_due = parse_date_safe(r.get("field-52"))
             h_pub = clean_val(r.get("field-8", ""))
             h_title = clean_val(r.get("field-13", ""))
             
@@ -814,8 +822,8 @@ with tab_accessory:
                     "更新": False,
                     "_record_idx": record_idx,
                     "受注番号": h_ord_no,
-                    "受注日": h_ord_date,  # 追加
-                    "納期": h_due,        # 追加
+                    "受注日": h_ord_date,
+                    "納期": h_due,
                     "出版社名": h_pub,
                     "書名": h_title,
                     "表 日付": parse_date_safe(rec_91.get("field-91_1")),
@@ -829,6 +837,8 @@ with tab_accessory:
                 })
         
         df_acc = pd.DataFrame(acc_flat_data)
+        if "納期" in df_acc.columns:
+            df_acc = df_acc.sort_values(by="納期", ascending=True, na_position="last").reset_index(drop=True)
         
         edited_acc_df = st.data_editor(
             df_acc,
@@ -839,8 +849,8 @@ with tab_accessory:
                 "更新": st.column_config.CheckboxColumn("更新チェック", required=True, help="チェックを入れた行の付物データを@pocketに上書き保存します"),
                 "_record_idx": None,
                 "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
-                "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD", disabled=True),  # 追加
-                "納期": st.column_config.DateColumn("納期", format="YYYY-MM-DD", disabled=True),        # 追加
+                "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD", disabled=True),
+                "納期": st.column_config.DateColumn("納期", format="YYYY-MM-DD", disabled=True),
                 "出版社名": st.column_config.TextColumn("出版社名", disabled=True),
                 "書名": st.column_config.TextColumn("書名", disabled=True),
                 "表 日付": st.column_config.DateColumn("表 日付", format="YYYY-MM-DD"),
@@ -857,7 +867,7 @@ with tab_accessory:
         st.markdown("---")
         col_dl3, col_dl4 = st.columns(2)
         with col_dl3:
-            excel_bytes_acc = to_excel_bytes(df_acc)
+            excel_bytes_acc = to_excel_bytes(edited_acc_df)
             st.download_button(
                 label="📥 付物明細一覧表を Excel でダウンロード",
                 data=excel_bytes_acc,
@@ -866,7 +876,7 @@ with tab_accessory:
                 key="dl_excel_acc"
             )
         with col_dl4:
-            pdf_bytes_acc = generate_accessory_pdf(df_acc)
+            pdf_bytes_acc = generate_accessory_pdf(edited_acc_df)
             st.download_button(
                 label="🖨️ 付物明細一覧表を PDF でダウンロード",
                 data=pdf_bytes_acc,
