@@ -153,7 +153,7 @@ def to_excel_bytes(df):
     output.seek(0)
     return output
 
-# --- 受注一覧表のPDF生成（渡されたDataFrameの並び順を完全に維持して描画） ---
+# --- 受注一覧表のPDF生成（日付列が折り返さないようカラム幅を個別指定） ---
 def generate_order_pdf(df):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=15, rightMargin=15, topMargin=15, bottomMargin=15)
@@ -169,28 +169,33 @@ def generate_order_pdf(df):
         Spacer(1, 10),
     ]
 
-    # 指定された不要項目を除外
     exclude_cols = ["更新", "_record_idx", "詳細", "単価", "納品日", "PL数", "見本数量", "配車区分", "納品", "在庫出荷", "売上日", "請求数量", "内見本数量"]
     target_cols = [c for c in df.columns if c not in exclude_cols]
 
     table_data = [[Paragraph(c, header_style) for c in target_cols]]
-    # df.iterrows() は渡されたデータフレームの現在の並び順（ソート・変更後）をそのまま維持します
     for _, row in df.iterrows():
         table_data.append([Paragraph(str(row[c]) if pd.notna(row[c]) else "", cell_style) for c in target_cols])
 
+    # 各列の幅を個別に設定（受注日・納期が10桁で絶対に折り返さないよう62ptを確保）
     total_width = 812
-    num_cols = len(target_cols)
-    col_w = total_width / num_cols
-    col_widths = [col_w] * num_cols
-    
-    if "書名" in target_cols:
-        title_idx = target_cols.index("書名")
-        col_widths[title_idx] = 130
-        remaining_width = total_width - 130
-        other_num = num_cols - 1
-        if other_num > 0:
-            other_w = remaining_width / other_num
-            col_widths = [130 if i == title_idx else other_w for i in range(num_cols)]
+    col_widths = []
+    for c in target_cols:
+        if c in ["受注日", "納期", "折本日", "無線日", "三方日", "仕上日", "見本納入日", "入品日"]:
+            col_widths.append(62)  # 日付が余裕で収まる幅
+        elif c == "書名":
+            col_widths.append(120) # 書名は広め
+        elif c == "受注番号":
+            col_widths.append(55)
+        elif c == "ISBN":
+            col_widths.append(85)
+        else:
+            col_widths.append(45)  # その他細かい列
+            
+    # 合計幅が812ptになるよう余白を配分調整
+    current_total = sum(col_widths)
+    if current_total != total_width and len(col_widths) > 0:
+        diff = (total_width - current_total) / len(col_widths)
+        col_widths = [w + diff for w in col_widths]
 
     t = Table(table_data, colWidths=col_widths, repeatRows=1)
     t.setStyle(TableStyle([
@@ -207,7 +212,7 @@ def generate_order_pdf(df):
     buffer.seek(0)
     return buffer
 
-# --- 付物明細一覧表のPDF生成（渡されたDataFrameの並び順を維持） ---
+# --- 付物明細一覧表のPDF生成 ---
 def generate_accessory_pdf(df):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
@@ -537,8 +542,9 @@ if "api_records" not in st.session_state or url_order_no:
         with st.spinner(f"DBから受注番号: {url_order_no} のデータを取得中..."):
             st.session_state["api_records"] = fetch_pocket_records(target_order_no=url_order_no)
     else:
-        default_end = date.today()
-        default_start = default_end - timedelta(days=21)
+        # 初期値：本日から14日後までの範囲に設定
+        default_start = date.today()
+        default_end = default_start + timedelta(days=14)
         st.session_state["api_records"] = fetch_pocket_records(start_date=default_start, end_date=default_end, date_field="field-1")
 
 # ==========================================
@@ -566,8 +572,9 @@ with tab1:
 
         col_s1, col_s2 = st.columns(2)
         with col_s1:
-            default_end = date.today()
-            default_start = default_end - timedelta(days=21)
+            # 初期値を本日から14日後に設定
+            default_start = date.today()
+            default_end = default_start + timedelta(days=14)
             t1_start = st.date_input("期間（開始）", value=default_start, key="t1_s")
         with col_s2:
             t1_end = st.date_input("期間（終了）", value=default_end, key="t1_e")
@@ -674,7 +681,6 @@ with tab1:
                         })
                 
                 df_temp = pd.DataFrame(flat_data)
-                # 【ポイント】デフォルトで「納期」の昇順にソート（納期がないものは末尾へ）
                 if "納期" in df_temp.columns:
                     df_temp = df_temp.sort_values(by="納期", ascending=True, na_position="last").reset_index(drop=True)
                 
@@ -750,7 +756,6 @@ with tab1:
             col_dl1, col_dl2 = st.columns(2)
             with col_dl1:
                 exclude_for_dl = ["単価", "納品日", "PL数", "見本数量", "配車区分", "納品", "在庫出荷", "売上日", "請求数量", "内見本数量"]
-                # 画面エディタで並び替えや編集が行われた現在の順番（edited_flat_df）をそのままExcel出力に反映
                 df_excel_export = edited_flat_df.drop(columns=[c for c in exclude_for_dl if c in edited_flat_df.columns])
                 excel_bytes_ord = to_excel_bytes(df_excel_export)
                 st.download_button(
@@ -761,7 +766,6 @@ with tab1:
                     key="dl_excel_order"
                 )
             with col_dl2:
-                # 画面エディタの現在の並び順（edited_flat_df）をそのままPDF出力に反映
                 pdf_bytes_ord = generate_order_pdf(edited_flat_df)
                 st.download_button(
                     label="🖨️ 受注一覧表を PDF でダウンロード",
@@ -1125,8 +1129,8 @@ if st.button("💾 チェックを入れたデータを データベース に�
             if url_order_no:
                 st.session_state["api_records"] = fetch_pocket_records(target_order_no=url_order_no)
             else:
-                default_end = date.today()
-                default_start = default_end - timedelta(days=21)
+                default_start = date.today()
+                default_end = default_start + timedelta(days=14)
                 st.session_state["api_records"] = fetch_pocket_records(start_date=default_start, end_date=default_end, date_field="field-1")
             st.rerun()
             
