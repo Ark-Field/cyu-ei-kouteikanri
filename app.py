@@ -23,18 +23,13 @@ st.set_page_config(page_title="受注一覧表・管理システム", layout="wi
 
 dark_navy_theme_css = """
     <style>
-    /* 全体背景 */
     .stApp {
         background-color: #F8FAFC;
     }
-    
-    /* ヘッダー・タイトルのカスタマイズ */
     h1, h2, h3 {
         color: #0F172A !important;
         font-family: 'Helvetica Neue', Arial, sans-serif;
     }
-    
-    /* 標準ボタン（濃紺系） */
     div.stButton > button:first-child {
         background-color: #1E3A8A;
         color: white;
@@ -49,8 +44,6 @@ dark_navy_theme_css = """
         background-color: #1E40AF;
         color: white;
     }
-
-    /* ダウンロードボタン（ダークスレート系） */
     div.stDownloadButton > button:first-child {
         background-color: #0F172A;
         color: white;
@@ -62,8 +55,6 @@ dark_navy_theme_css = """
         background-color: #1E293B;
         color: white;
     }
-
-    /* タブのスタイリング */
     .stTabs [data-baseweb="tab-list"] {
         gap: 6px;
     }
@@ -78,16 +69,12 @@ dark_navy_theme_css = """
         background-color: #1E3A8A !important;
         color: white !important;
     }
-
-    /* エパンダー（検索条件など）のヘッダー */
     .streamlit-expanderHeader {
         background-color: #F1F5F9;
         border-radius: 6px;
         color: #1E293B;
         font-weight: bold;
     }
-
-    /* Streamlit標準の不要要素を完全非表示 */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
@@ -166,7 +153,7 @@ def to_excel_bytes(df):
     output.seek(0)
     return output
 
-# --- 受注一覧表のPDF生成 ---
+# --- 受注一覧表のPDF生成（書名幅を広く・不要項目を除外） ---
 def generate_order_pdf(df):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=15, rightMargin=15, topMargin=15, bottomMargin=15)
@@ -182,15 +169,31 @@ def generate_order_pdf(df):
         Spacer(1, 10),
     ]
 
-    exclude_cols = ["更新", "_record_idx", "詳細"]
+    # 指定された不要項目を除外
+    exclude_cols = ["更新", "_record_idx", "詳細", "単価", "納品日", "PL数", "見本数量", "配車区分", "納品", "在庫出荷", "売上日", "請求数量", "内見本数量"]
     target_cols = [c for c in df.columns if c not in exclude_cols]
 
     table_data = [[Paragraph(c, header_style) for c in target_cols]]
     for _, row in df.iterrows():
         table_data.append([Paragraph(str(row[c]) if pd.notna(row[c]) else "", cell_style) for c in target_cols])
 
-    col_w = 812 / len(target_cols)
-    t = Table(table_data, colWidths=[col_w] * len(target_cols), repeatRows=1)
+    # 書名列（約18文字分の広さ）を考慮したカラム幅の配分
+    total_width = 812
+    num_cols = len(target_cols)
+    col_w = total_width / num_cols
+    col_widths = [col_w] * num_cols
+    
+    # 「書名」が含まれている場合は幅を広げる（約130pt程度確保）
+    if "書名" in target_cols:
+        title_idx = target_cols.index("書名")
+        col_widths[title_idx] = 130
+        remaining_width = total_width - 130
+        other_num = num_cols - 1
+        if other_num > 0:
+            other_w = remaining_width / other_num
+            col_widths = [130 if i == title_idx else other_w for i in range(num_cols)]
+
+    t = Table(table_data, colWidths=col_widths, repeatRows=1)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
         ("ALIGN", (0, 0), (-1, -1), "LEFT"),
@@ -462,7 +465,6 @@ def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, t
         if start_date and end_date:
             start_str = start_date.strftime("%Y-%m-%d")
             end_str = end_date.strftime("%Y-%m-%d")
-            # 選択された日付フィールド（field-1:受注日 または field-52:納期）でクエリ
             query_parts.append(f'{date_field} >= "{start_str}" and {date_field} <= "{end_str}"')
         
         if target_publisher:
@@ -560,7 +562,6 @@ with tab1:
         st.success(f"🔗 DBから受注番号 **{url_order_no}** のデータを起動しました！")
     
     with st.expander("🔍 検索条件の変更・絞り込みはこちら", expanded=bool(not url_order_no)):
-        # 期間検索の基準を「受注日」か「納期」から選択
         search_date_type = st.radio("📅 期間検索の基準を選択", ["受注日（field-1）", "納期（field-52）"], horizontal=True)
         target_date_field = "field-1" if "受注日" in search_date_type else "field-52"
 
@@ -610,7 +611,7 @@ with tab1:
                 for record_idx, r in enumerate(api_records):
                     h_ord_no = clean_val(r.get("field-2", ""))
                     h_ord_date = parse_date_safe(r.get("field-1"))
-                    h_due = parse_date_safe(r.get("field-52"))  # 納期を日付としてパース
+                    h_due = parse_date_safe(r.get("field-52"))
                     h_pub = clean_val(r.get("field-8", ""))
                     h_title = clean_val(r.get("field-13", ""))
                     h_qty = clean_val(r.get("field-4", ""))
@@ -645,7 +646,7 @@ with tab1:
                             "詳細": detail_url,
                             "受注番号": h_ord_no,
                             "受注日": h_ord_date,
-                            "納期": h_due,  # 受注日のすぐ後ろに配置
+                            "納期": h_due,
                             "出版社名": h_pub,
                             "書名": h_title,
                             "製本数": h_qty,
@@ -708,7 +709,7 @@ with tab1:
                     ),
                     "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
                     "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD", disabled=True),
-                    "納期": st.column_config.DateColumn("納期", format="YYYY-MM-DD", disabled=True),  # 納期を日付カラムに
+                    "納期": st.column_config.DateColumn("納期", format="YYYY-MM-DD", disabled=True),
                     "出版社名": st.column_config.TextColumn("出版社名", disabled=True),
                     "書名": st.column_config.TextColumn("書名", disabled=True),
                     "製本数": st.column_config.TextColumn("製本数", disabled=True),
@@ -740,7 +741,10 @@ with tab1:
             st.markdown("---")
             col_dl1, col_dl2 = st.columns(2)
             with col_dl1:
-                excel_bytes_ord = to_excel_bytes(edited_flat_df)
+                # Excelダウンロード用は指定した不要項目を除外したDataFrameを作成
+                exclude_for_dl = ["単価", "納品日", "PL数", "見本数量", "配車区分", "納品", "在庫出荷", "売上日", "請求数量", "内見本数量"]
+                df_excel_export = edited_flat_df.drop(columns=[c for c in exclude_for_dl if c in edited_flat_df.columns])
+                excel_bytes_ord = to_excel_bytes(df_excel_export)
                 st.download_button(
                     label="📥 受注一覧表を Excel でダウンロード",
                     data=excel_bytes_ord,
