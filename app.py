@@ -390,6 +390,7 @@ def generate_invoice_pdf(grouped_invoice_dict, bank_info):
             Paragraph("納品日", th_style),
             Paragraph("書名", th_style),
             Paragraph("請求数量", th_style),
+            Paragraph("内見本数", th_style),
             Paragraph("単価", th_style),
             Paragraph("金額", th_style),
             Paragraph("備考", th_style)
@@ -409,12 +410,13 @@ def generate_invoice_pdf(grouped_invoice_dict, bank_info):
                 Paragraph(clean_val(item["売上日"]), td_style),
                 Paragraph(item["書名"], td_style),
                 Paragraph(f"{q_num} 部", td_right),
+                Paragraph(f"{clean_val(item['内見本数量'])} 部", td_right),
                 Paragraph(f"￥{p_num:,.2f}", td_right),
                 Paragraph(f"￥{line_total:,.2f}", td_right),
                 Paragraph(item["備考"], td_style)
             ])
             
-        inv_table = Table(table_data, colWidths=[75, 180, 60, 75, 80, 75])
+        inv_table = Table(table_data, colWidths=[65, 150, 55, 55, 70, 75, 75])
         inv_table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -442,12 +444,12 @@ def generate_invoice_pdf(grouped_invoice_dict, bank_info):
     return buffer
 
 # ==========================================
-# 5. URLパラメータのチェック
+# 5. URLパラメータのチェック ＆ 期間クエリ対応のデータ取得関数
 # ==========================================
 query_params = st.query_params
 url_order_no = query_params.get("ord", None)
 
-def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, target_publisher=None):
+def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, target_publisher=None, date_field="field-1"):
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
     headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
     
@@ -460,7 +462,8 @@ def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, t
         if start_date and end_date:
             start_str = start_date.strftime("%Y-%m-%d")
             end_str = end_date.strftime("%Y-%m-%d")
-            query_parts.append(f'field-1 >= "{start_str}" and field-1 <= "{end_str}"')
+            # 選択された日付フィールド（field-1:受注日 または field-52:納期）でクエリ
+            query_parts.append(f'{date_field} >= "{start_str}" and {date_field} <= "{end_str}"')
         
         if target_publisher:
             query_parts.append(f'field-8 like "{target_publisher}"')
@@ -506,7 +509,7 @@ def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, t
             
             for r in parsed_records:
                 if start_str and end_str:
-                    raw_date_str = str(r.get("field-1", ""))
+                    raw_date_str = str(r.get(date_field, ""))
                     if not raw_date_str or raw_date_str.lower() in ["nan", "none"]:
                         continue
                     r_date = raw_date_str.replace("/", "-")[:10]
@@ -535,7 +538,7 @@ if "api_records" not in st.session_state or url_order_no:
     else:
         default_end = date.today()
         default_start = default_end - timedelta(days=21)
-        st.session_state["api_records"] = fetch_pocket_records(start_date=default_start, end_date=default_end)
+        st.session_state["api_records"] = fetch_pocket_records(start_date=default_start, end_date=default_end, date_field="field-1")
 
 # ==========================================
 # 6. タブ構成の定義
@@ -557,19 +560,23 @@ with tab1:
         st.success(f"🔗 DBから受注番号 **{url_order_no}** のデータを起動しました！")
     
     with st.expander("🔍 検索条件の変更・絞り込みはこちら", expanded=bool(not url_order_no)):
+        # 期間検索の基準を「受注日」か「納期」から選択
+        search_date_type = st.radio("📅 期間検索の基準を選択", ["受注日（field-1）", "納期（field-52）"], horizontal=True)
+        target_date_field = "field-1" if "受注日" in search_date_type else "field-52"
+
         col_s1, col_s2 = st.columns(2)
         with col_s1:
             default_end = date.today()
             default_start = default_end - timedelta(days=21)
-            t1_start = st.date_input("受注日（開始）", value=default_start, key="t1_s")
+            t1_start = st.date_input("期間（開始）", value=default_start, key="t1_s")
         with col_s2:
-            t1_end = st.date_input("受注日（終了）", value=default_end, key="t1_e")
+            t1_end = st.date_input("期間（終了）", value=default_end, key="t1_e")
         
         publisher_input = st.text_input("📖 出版社名で絞り込み（空欄なら期間内すべて）", value="", key="pub_ord")
         
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
-            search_clicked = st.button("🔄 期間 ＆ 出版社名で検索", type="primary", key="btn_s1")
+            search_clicked = st.button("🔄 指定期間 ＆ 出版社名で検索", type="primary", key="btn_s1")
         
         st.markdown("---")
         direct_order_input = st.text_input("🏷️ 受注番号で直接検索（1件指定）", value=url_order_no if url_order_no else "", key="direct_ord")
@@ -581,7 +588,8 @@ with tab1:
             st.session_state["api_records"] = fetch_pocket_records(
                 start_date=t1_start, 
                 end_date=t1_end, 
-                target_publisher=publisher_input if publisher_input else None
+                target_publisher=publisher_input if publisher_input else None,
+                date_field=target_date_field
             )
         st.rerun()
 
@@ -602,6 +610,7 @@ with tab1:
                 for record_idx, r in enumerate(api_records):
                     h_ord_no = clean_val(r.get("field-2", ""))
                     h_ord_date = parse_date_safe(r.get("field-1"))
+                    h_due = parse_date_safe(r.get("field-52"))  # 納期を日付としてパース
                     h_pub = clean_val(r.get("field-8", ""))
                     h_title = clean_val(r.get("field-13", ""))
                     h_qty = clean_val(r.get("field-4", ""))
@@ -615,8 +624,8 @@ with tab1:
                     sub_89 = r.get("field-89", [])
                     
                     max_len = max(len(sub_90) if isinstance(sub_90, list) else 0,
-                                len(sub_88) if isinstance(sub_88, list) else 0,
-                                len(sub_89) if isinstance(sub_89, list) else 0, 1)
+                                  len(sub_88) if isinstance(sub_88, list) else 0,
+                                  len(sub_89) if isinstance(sub_89, list) else 0, 1)
                     
                     for i in range(max_len):
                         item_90 = sub_90[i] if isinstance(sub_90, list) and len(sub_90) > i else {}
@@ -636,15 +645,17 @@ with tab1:
                             "詳細": detail_url,
                             "受注番号": h_ord_no,
                             "受注日": h_ord_date,
+                            "納期": h_due,  # 受注日のすぐ後ろに配置
                             "出版社名": h_pub,
                             "書名": h_title,
                             "製本数": h_qty,
                             "単価": h_price,
-                            "配本日": parse_date_safe(rec_90.get("field-90_1")),
                             "折本日": parse_date_safe(rec_90.get("field-90_3")),
                             "無線日": parse_date_safe(rec_90.get("field-90_4")),
                             "三方日": parse_date_safe(rec_90.get("field-90_5")),
                             "仕上日": parse_date_safe(rec_90.get("field-90_6")),
+                            "見本納入日": parse_date_safe(rec_90.get("field-90_1")),
+                            "入品日": parse_date_safe(rec_90.get("field-90_10")),
                             "備考": clean_val(rec_90.get("field-90_9", "")),
                             "納品日": parse_date_safe(rec_88.get("field-88_2")),
                             "納品数": clean_val(rec_88.get("field-88_4", "")),
@@ -655,6 +666,7 @@ with tab1:
                             "在庫出荷": False,
                             "売上日": parse_date_safe(rec_89.get("field-89_1")),
                             "請求数量": clean_val(rec_89.get("field-89_3", "")),
+                            "内見本数量": clean_val(rec_89.get("field-89_12", "")),
                             "備考_請求": clean_val(rec_89.get("field-89_7", "")),
                             "請求": False
                         })
@@ -696,15 +708,17 @@ with tab1:
                     ),
                     "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
                     "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD", disabled=True),
+                    "納期": st.column_config.DateColumn("納期", format="YYYY-MM-DD", disabled=True),  # 納期を日付カラムに
                     "出版社名": st.column_config.TextColumn("出版社名", disabled=True),
                     "書名": st.column_config.TextColumn("書名", disabled=True),
                     "製本数": st.column_config.TextColumn("製本数", disabled=True),
                     "単価": st.column_config.TextColumn("単価", disabled=True),
-                    "配本日": st.column_config.DateColumn("配本日", format="YYYY-MM-DD"),
                     "折本日": st.column_config.DateColumn("折本日", format="YYYY-MM-DD"),
                     "無線日": st.column_config.DateColumn("無線日", format="YYYY-MM-DD"),
                     "三方日": st.column_config.DateColumn("三方日", format="YYYY-MM-DD"),
                     "仕上日": st.column_config.DateColumn("仕上日", format="YYYY-MM-DD"),
+                    "見本納入日": st.column_config.DateColumn("見本納入日", format="YYYY-MM-DD", help="見本納入日（field-90_1）"),
+                    "入品日": st.column_config.DateColumn("入品日", format="YYYY-MM-DD", help="入品日（field-90_10）"),
                     "備考": st.column_config.TextColumn("備考"),
                     "納品日": st.column_config.DateColumn("納品日", format="YYYY-MM-DD", help="納品日（field-88_2）"),
                     "納品数": st.column_config.TextColumn("納品数", help="納品数（field-88_4）"),
@@ -715,6 +729,7 @@ with tab1:
                     "在庫出荷": st.column_config.CheckboxColumn("在庫出荷", help="チェックすると在庫出荷扱いになります"),
                     "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
                     "請求数量": st.column_config.TextColumn("請求数量"),
+                    "内見本数量": st.column_config.TextColumn("内見本数量", help="内見本数量（field-89_12）"),
                     "備考_請求": st.column_config.TextColumn("備考（請求）"),
                     "請求": st.column_config.CheckboxColumn("請求", help="チェックすると請求書発行の対象になります"),
                 }
@@ -906,25 +921,36 @@ if st.button("💾 チェックを入れたデータを データベース に�
             sub90_list = []
             if source_tab == "flat":
                 row_90 = first_row
+                
+                def date_to_str(val):
+                    if pd.isna(val) or not val:
+                        return ""
+                    if isinstance(val, (date, datetime)):
+                        return val.strftime("%Y-%m-%d")
+                    parsed = parse_date_safe(val)
+                    return parsed.strftime("%Y-%m-%d") if parsed else ""
+
                 if isinstance(orig_sub_90, list) and len(orig_sub_90) > 0:
                     item_90 = copy.deepcopy(orig_sub_90[0])
                     rec_dict = item_90.get("record", {})
-                    rec_dict["field-90_1"] = clean_val(row_90["配本日"])
-                    rec_dict["field-90_3"] = clean_val(row_90["折本日"])
-                    rec_dict["field-90_4"] = clean_val(row_90["無線日"])
-                    rec_dict["field-90_5"] = clean_val(row_90["三方日"])
-                    rec_dict["field-90_6"] = clean_val(row_90["仕上日"])
+                    rec_dict["field-90_3"] = date_to_str(row_90["折本日"])
+                    rec_dict["field-90_4"] = date_to_str(row_90["無線日"])
+                    rec_dict["field-90_5"] = date_to_str(row_90["三方日"])
+                    rec_dict["field-90_6"] = date_to_str(row_90["仕上日"])
+                    rec_dict["field-90_1"] = date_to_str(row_90["見本納入日"])
+                    rec_dict["field-90_10"] = date_to_str(row_90["入品日"])
                     rec_dict["field-90_9"] = clean_val(row_90["備考"])
                     item_90["record"] = rec_dict
                     sub90_list.append(item_90)
                 else:
                     sub90_list.append({
                         "record": {
-                            "field-90_1": clean_val(first_row["配本日"]),
-                            "field-90_3": clean_val(first_row["折本日"]),
-                            "field-90_4": clean_val(first_row["無線日"]),
-                            "field-90_5": clean_val(first_row["三方日"]),
-                            "field-90_6": clean_val(first_row["仕上日"]),
+                            "field-90_3": date_to_str(first_row["折本日"]),
+                            "field-90_4": date_to_str(first_row["無線日"]),
+                            "field-90_5": date_to_str(first_row["三方日"]),
+                            "field-90_6": date_to_str(first_row["仕上日"]),
+                            "field-90_1": date_to_str(first_row["見本納入日"]),
+                            "field-90_10": date_to_str(first_row["入品日"]),
                             "field-90_9": clean_val(first_row["備考"]),
                             "field-90_2": ""
                         }
@@ -937,8 +963,8 @@ if st.button("💾 チェックを入れたデータを データベース に�
             sub88_list = []
             if source_tab == "flat":
                 row_88 = first_row
-                deliv_date_val = row_88["納品日"]
                 deliv_date_str = ""
+                deliv_date_val = row_88["納品日"]
                 if pd.notna(deliv_date_val):
                     if isinstance(deliv_date_val, (date, datetime)):
                         deliv_date_str = deliv_date_val.strftime("%Y-%m-%d")
@@ -976,8 +1002,8 @@ if st.button("💾 チェックを入れたデータを データベース に�
             sub89_list = []
             if source_tab == "flat":
                 row_89 = first_row
-                sale_date_val = row_89["売上日"]
                 sale_date_str = ""
+                sale_date_val = row_89["売上日"]
                 if pd.notna(sale_date_val):
                     if isinstance(sale_date_val, (date, datetime)):
                         sale_date_str = sale_date_val.strftime("%Y-%m-%d")
@@ -991,6 +1017,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     rec_dict_89 = item_89.get("record", {})
                     rec_dict_89["field-89_1"] = sale_date_str
                     rec_dict_89["field-89_3"] = clean_val(row_89["請求数量"]) or "0"
+                    rec_dict_89["field-89_12"] = clean_val(row_89["内見本数量"]) or "0"
                     rec_dict_89["field-89_7"] = clean_val(row_89["備考_請求"])
                     for k in ["field-89_5", "field-89_6"]:
                         rec_dict_89.pop(k, None)
@@ -1001,6 +1028,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
                         "record": {
                             "field-89_1": sale_date_str,
                             "field-89_3": clean_val(first_row["請求数量"]) or "0",
+                            "field-89_12": clean_val(first_row["内見本数量"]) or "0",
                             "field-89_7": clean_val(first_row["備考_請求"])
                         }
                     })
@@ -1078,7 +1106,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
             else:
                 default_end = date.today()
                 default_start = default_end - timedelta(days=21)
-                st.session_state["api_records"] = fetch_pocket_records(start_date=default_start, end_date=default_end)
+                st.session_state["api_records"] = fetch_pocket_records(start_date=default_start, end_date=default_end, date_field="field-1")
             st.rerun()
             
         if fail_count > 0:
@@ -1189,6 +1217,7 @@ with tab3:
                     "書名": clean_val(row.get("書名", "")),
                     "売上日": row.get("売上日"),
                     "請求数量": clean_val(row.get("請求数量", "0")),
+                    "内見本数量": clean_val(row.get("内見本数量", "0")),
                     "単価": clean_val(row.get("単価", "0")),
                     "備考": clean_val(row.get("備考_請求", ""))
                 })
