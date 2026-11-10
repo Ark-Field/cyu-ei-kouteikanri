@@ -183,7 +183,6 @@ def generate_order_pdf(df):
     col_w = total_width / num_cols
     col_widths = [col_w] * num_cols
     
-    # 「書名」が含まれている場合は幅を広げる（約130pt程度確保）
     if "書名" in target_cols:
         title_idx = target_cols.index("書名")
         col_widths[title_idx] = 130
@@ -614,6 +613,7 @@ with tab1:
                     h_due = parse_date_safe(r.get("field-52"))
                     h_pub = clean_val(r.get("field-8", ""))
                     h_title = clean_val(r.get("field-13", ""))
+                    h_isbn = clean_val(r.get("field-93", ""))  # ISBN (field-93)
                     h_qty = clean_val(r.get("field-4", ""))
                     h_price = clean_val(r.get("field-5", ""))
                     
@@ -649,6 +649,7 @@ with tab1:
                             "納期": h_due,
                             "出版社名": h_pub,
                             "書名": h_title,
+                            "ISBN": h_isbn,  # ISBNを追加
                             "製本数": h_qty,
                             "単価": h_price,
                             "折本日": parse_date_safe(rec_90.get("field-90_3")),
@@ -712,6 +713,7 @@ with tab1:
                     "納期": st.column_config.DateColumn("納期", format="YYYY-MM-DD", disabled=True),
                     "出版社名": st.column_config.TextColumn("出版社名", disabled=True),
                     "書名": st.column_config.TextColumn("書名", disabled=True),
+                    "ISBN": st.column_config.TextColumn("ISBN", disabled=True, help="ISBN番号 (field-93)"),
                     "製本数": st.column_config.TextColumn("製本数", disabled=True),
                     "単価": st.column_config.TextColumn("単価", disabled=True),
                     "折本日": st.column_config.DateColumn("折本日", format="YYYY-MM-DD"),
@@ -741,7 +743,6 @@ with tab1:
             st.markdown("---")
             col_dl1, col_dl2 = st.columns(2)
             with col_dl1:
-                # Excelダウンロード用は指定した不要項目を除外したDataFrameを作成
                 exclude_for_dl = ["単価", "納品日", "PL数", "見本数量", "配車区分", "納品", "在庫出荷", "売上日", "請求数量", "内見本数量"]
                 df_excel_export = edited_flat_df.drop(columns=[c for c in exclude_for_dl if c in edited_flat_df.columns])
                 excel_bytes_ord = to_excel_bytes(df_excel_export)
@@ -797,6 +798,8 @@ with tab_accessory:
         acc_flat_data = []
         for record_idx, r in enumerate(api_records):
             h_ord_no = clean_val(r.get("field-2", ""))
+            h_ord_date = parse_date_safe(r.get("field-1"))  # 受注日を追加
+            h_due = parse_date_safe(r.get("field-52"))       # 納期を追加
             h_pub = clean_val(r.get("field-8", ""))
             h_title = clean_val(r.get("field-13", ""))
             
@@ -811,6 +814,8 @@ with tab_accessory:
                     "更新": False,
                     "_record_idx": record_idx,
                     "受注番号": h_ord_no,
+                    "受注日": h_ord_date,  # 追加
+                    "納期": h_due,        # 追加
                     "出版社名": h_pub,
                     "書名": h_title,
                     "表 日付": parse_date_safe(rec_91.get("field-91_1")),
@@ -834,6 +839,8 @@ with tab_accessory:
                 "更新": st.column_config.CheckboxColumn("更新チェック", required=True, help="チェックを入れた行の付物データを@pocketに上書き保存します"),
                 "_record_idx": None,
                 "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
+                "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD", disabled=True),  # 追加
+                "納期": st.column_config.DateColumn("納期", format="YYYY-MM-DD", disabled=True),        # 追加
                 "出版社名": st.column_config.TextColumn("出版社名", disabled=True),
                 "書名": st.column_config.TextColumn("書名", disabled=True),
                 "表 日付": st.column_config.DateColumn("表 日付", format="YYYY-MM-DD"),
