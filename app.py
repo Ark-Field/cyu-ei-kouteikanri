@@ -169,7 +169,7 @@ def generate_order_pdf(df):
         Spacer(1, 10),
     ]
 
-    exclude_cols = ["更新", "_record_idx", "詳細", "単価", "納品日", "PL数", "見本数量", "在庫出荷", "配車区分", "納品", "売上日", "請求数量", "内見本数量", "請求"]
+    exclude_cols = ["更新", "_record_idx", "詳細", "単価", "納品日", "PL数", "見本数量", "在庫出荷", "配車区分", "納品", "売上日", "請求数量", "請求単価", "内見本数量", "請求"]
     target_cols = [c for c in df.columns if c not in exclude_cols]
 
     table_data = [[Paragraph(c, header_style) for c in target_cols]]
@@ -351,7 +351,7 @@ def generate_invoice_pdf(grouped_invoice_dict, bank_info):
         subtotal = 0
         for item in items:
             q_str = clean_val(item["請求数量"])
-            p_str = clean_val(item["単価"])
+            p_str = clean_val(item["請求単価"])
             q_num = int(q_str) if q_str.isdigit() else 0
             try:
                 p_num = float(p_str) if p_str else 0.0
@@ -397,15 +397,15 @@ def generate_invoice_pdf(grouped_invoice_dict, bank_info):
             Paragraph("納品日", th_style),
             Paragraph("書名", th_style),
             Paragraph("請求数量", th_style),
+            Paragraph("請求単価", th_style),
             Paragraph("内見本数", th_style),
-            Paragraph("単価", th_style),
             Paragraph("金額", th_style),
             Paragraph("備考", th_style)
         ]]
         
         for item in items:
             q_str = clean_val(item["請求数量"])
-            p_str = clean_val(item["単価"])
+            p_str = clean_val(item["請求単価"])
             q_num = int(q_str) if q_str.isdigit() else 0
             try:
                 p_num = float(p_str) if p_str else 0.0
@@ -417,13 +417,13 @@ def generate_invoice_pdf(grouped_invoice_dict, bank_info):
                 Paragraph(clean_val(item["売上日"]), td_style),
                 Paragraph(item["書名"], td_style),
                 Paragraph(f"{q_num} 部", td_right),
-                Paragraph(f"{clean_val(item['内見本数量'])} 部", td_right),
                 Paragraph(f"￥{p_num:,.2f}", td_right),
+                Paragraph(f"{clean_val(item['内見本数量'])} 部", td_right),
                 Paragraph(f"￥{line_total:,.2f}", td_right),
                 Paragraph(item["備考"], td_style)
             ])
             
-        inv_table = Table(table_data, colWidths=[65, 150, 55, 55, 70, 75, 75])
+        inv_table = Table(table_data, colWidths=[60, 140, 50, 60, 50, 75, 110])
         inv_table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -643,12 +643,10 @@ with tab1:
                         item_89 = sub_89[i] if isinstance(sub_89, list) and len(sub_89) > i else {}
                         rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
                         
-                        # 在庫出荷（field-88_13）の安全な取得（空欄 または 在庫から）
                         val_88_13 = clean_val(rec_88.get("field-88_13", ""))
                         if val_88_13 != "在庫から":
                             val_88_13 = ""
 
-                        # 配車区分（field-88_10）の安全な取得（フリーテキスト）
                         val_88_10 = clean_val(rec_88.get("field-88_10", ""))
 
                         flat_data.append({
@@ -679,6 +677,7 @@ with tab1:
                             "納品": False,
                             "売上日": parse_date_safe(rec_89.get("field-89_1")),
                             "請求数量": clean_val(rec_89.get("field-89_3", "")),
+                            "請求単価": clean_val(rec_89.get("field-89_4", "")),
                             "内見本数量": clean_val(rec_89.get("field-89_12", "")),
                             "備考_請求": clean_val(rec_89.get("field-89_7", "")),
                             "請求": False
@@ -754,7 +753,8 @@ with tab1:
                     "配車区分": st.column_config.TextColumn("配車区分", help="配車区分を入力します（field-88_10）"),
                     "納品": st.column_config.CheckboxColumn("納品", help="チェックすると納品書発行の対象になります"),
                     "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
-                    "請求数量": st.column_config.TextColumn("請求数量"),
+                    "請求数量": st.column_config.TextColumn("請求数量", help="請求数量（field-89_3）"),
+                    "請求単価": st.column_config.TextColumn("請求単価", help="請求単価（field-89_4）"),
                     "内見本数量": st.column_config.TextColumn("内見本数量", help="内見本数量（field-89_12）"),
                     "備考_請求": st.column_config.TextColumn("備考（請求）"),
                     "請求": st.column_config.CheckboxColumn("請求", help="チェックすると請求書発行の対象になります"),
@@ -766,7 +766,7 @@ with tab1:
             st.markdown("---")
             col_dl1, col_dl2 = st.columns(2)
             with col_dl1:
-                exclude_for_dl = ["単価", "納品日", "PL数", "見本数量", "在庫出荷", "配車区分", "納品", "売上日", "請求数量", "内見本数量"]
+                exclude_for_dl = ["単価", "納品日", "PL数", "見本数量", "在庫出荷", "配車区分", "納品", "売上日", "請求数量", "請求単価", "内見本数量"]
                 df_excel_export = edited_flat_df.drop(columns=[c for c in exclude_for_dl if c in edited_flat_df.columns])
                 excel_bytes_ord = to_excel_bytes(df_excel_export)
                 st.download_button(
@@ -915,12 +915,10 @@ with tab_accessory:
         st.warning("⚠️ 表示対象の受注データがありません。タブ1で検索を行ってください。")
 
 # ==========================================
-# 共通の上書き保存処理（上部ボタンまたは下部ボタンから実行）
+# 共通の上書き保存処理
 # ==========================================
 st.divider()
 
-# 下部にも常時保存ボタンを置いておきたい場合は残せますが、上部にボタンを配置したため統合可能です
-# 今回は上部の「上書き保存」ボタンが押されたとき、または従来の下部ボタンが押されたときの両方に対応します
 bottom_save_clicked = st.button("💾 チェックを入れたデータを データベース に一括上書き保存する", type="primary", key="btn_save_checked_all")
 
 if top_save_clicked or bottom_save_clicked:
@@ -1070,6 +1068,7 @@ if top_save_clicked or bottom_save_clicked:
                     rec_dict_89 = item_89.get("record", {})
                     rec_dict_89["field-89_1"] = sale_date_str
                     rec_dict_89["field-89_3"] = clean_val(row_89["請求数量"]) or "0"
+                    rec_dict_89["field-89_4"] = clean_val(row_89["請求単価"]) or "0"
                     rec_dict_89["field-89_12"] = clean_val(row_89["内見本数量"]) or "0"
                     rec_dict_89["field-89_7"] = clean_val(row_89["備考_請求"])
                     for k in ["field-89_5", "field-89_6"]:
@@ -1081,6 +1080,7 @@ if top_save_clicked or bottom_save_clicked:
                         "record": {
                             "field-89_1": sale_date_str,
                             "field-89_3": clean_val(first_row["請求数量"]) or "0",
+                            "field-89_4": clean_val(first_row["請求単価"]) or "0",
                             "field-89_12": clean_val(first_row["内見本数量"]) or "0",
                             "field-89_7": clean_val(first_row["備考_請求"])
                         }
@@ -1270,8 +1270,8 @@ with tab3:
                     "書名": clean_val(row.get("書名", "")),
                     "売上日": row.get("売上日"),
                     "請求数量": clean_val(row.get("請求数量", "0")),
+                    "請求単価": clean_val(row.get("請求単価", "0")),
                     "内見本数量": clean_val(row.get("内見本数量", "0")),
-                    "単価": clean_val(row.get("単価", "0")),
                     "備考": clean_val(row.get("備考_請求", ""))
                 })
     else:
