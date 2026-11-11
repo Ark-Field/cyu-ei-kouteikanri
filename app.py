@@ -169,7 +169,7 @@ def generate_order_pdf(df):
         Spacer(1, 10),
     ]
 
-    exclude_cols = ["更新", "_record_idx", "詳細", "単価", "納品日", "PL数", "見本数量", "在庫出荷", "配車区分", "納品", "売上日", "請求数量", "請求単価", "内見本数量", "請求"]
+    exclude_cols = ["更新", "_record_idx", "_sub_idx", "詳細", "単価", "納品日", "PL数", "見本数量", "在庫出荷", "配車区分", "納品", "売上日", "請求数量", "請求単価", "内見本数量", "請求"]
     target_cols = [c for c in df.columns if c not in exclude_cols]
 
     table_data = [[Paragraph(c, header_style) for c in target_cols]]
@@ -228,7 +228,7 @@ def generate_accessory_pdf(df):
         Spacer(1, 10),
     ]
 
-    exclude_cols = ["更新", "_record_idx", "詳細"]
+    exclude_cols = ["更新", "_record_idx", "_sub_idx", "詳細"]
     target_cols = [c for c in df.columns if c not in exclude_cols]
 
     table_data = [[Paragraph(c, header_style) for c in target_cols]]
@@ -652,6 +652,7 @@ with tab1:
                         flat_data.append({
                             "更新": False,
                             "_record_idx": record_idx,
+                            "_sub_idx": i,  # ★ サブテーブル上の行インデックスを保持
                             "詳細": detail_url,
                             "受注番号": h_ord_no,
                             "受注日": h_ord_date,
@@ -720,6 +721,7 @@ with tab1:
                 column_config={
                     "更新": st.column_config.CheckboxColumn("更新チェック", required=True, help="チェックを入れた行のデータを@pocketに上書き保存します"),
                     "_record_idx": None,
+                    "_sub_idx": None,
                     "詳細": st.column_config.LinkColumn(
                         "🔗 @pocket詳細",
                         help="@pocketの該当データ画面へジャンプします",
@@ -841,6 +843,7 @@ with tab_accessory:
                 acc_flat_data.append({
                     "更新": False,
                     "_record_idx": record_idx,
+                    "_sub_idx": i,  # ★ サブテーブル上の行インデックスを保持
                     "詳細": detail_url,
                     "受注番号": h_ord_no,
                     "受注日": h_ord_date,
@@ -869,6 +872,7 @@ with tab_accessory:
             column_config={
                 "更新": st.column_config.CheckboxColumn("更新チェック", required=True, help="チェックを入れた行の付物データを@pocketに上書き保存します"),
                 "_record_idx": None,
+                "_sub_idx": None,
                 "詳細": st.column_config.LinkColumn(
                     "🔗 @pocket詳細",
                     help="@pocketの該当データ画面へジャンプします",
@@ -915,7 +919,7 @@ with tab_accessory:
         st.warning("⚠️ 表示対象の受注データがありません。タブ1で検索を行ってください。")
 
 # ==========================================
-# 共通の上書き保存処理
+# 共通の上書き保存処理（_sub_idx 完全対応版）
 # ==========================================
 st.divider()
 
@@ -957,7 +961,6 @@ if top_save_clicked or bottom_save_clicked:
                 continue
             
             update_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records/{record_id}"
-            first_row = group_df.iloc[0]
             
             record_payload = {
                 "field-2": clean_val(original_rec.get("field-2", "")),
@@ -966,11 +969,10 @@ if top_save_clicked or bottom_save_clicked:
                 "field-5": clean_val(original_rec.get("field-5", "")),
             }
             
+            # --- 1. field-90 (工程日等) の更新 (_sub_idx 対応) ---
             orig_sub_90 = original_rec.get("field-90", [])
-            sub90_list = []
+            sub90_list = copy.deepcopy(orig_sub_90)
             if source_tab == "flat":
-                row_90 = first_row
-                
                 def date_to_str(val):
                     if pd.isna(val) or not val:
                         return ""
@@ -979,112 +981,86 @@ if top_save_clicked or bottom_save_clicked:
                     parsed = parse_date_safe(val)
                     return parsed.strftime("%Y-%m-%d") if parsed else ""
 
-                if isinstance(orig_sub_90, list) and len(orig_sub_90) > 0:
-                    item_90 = copy.deepcopy(orig_sub_90[0])
-                    rec_dict = item_90.get("record", {})
-                    rec_dict["field-90_3"] = date_to_str(row_90["折本日"])
-                    rec_dict["field-90_4"] = date_to_str(row_90["無線日"])
-                    rec_dict["field-90_5"] = date_to_str(row_90["三方日"])
-                    rec_dict["field-90_6"] = date_to_str(row_90["仕上日"])
-                    rec_dict["field-90_1"] = date_to_str(row_90["見本納入日"])
-                    rec_dict["field-90_10"] = date_to_str(row_90["入品日"])
-                    rec_dict["field-90_9"] = clean_val(row_90["備考"])
-                    item_90["record"] = rec_dict
-                    sub90_list.append(item_90)
-                else:
-                    sub90_list.append({
-                        "record": {
-                            "field-90_3": date_to_str(first_row["折本日"]),
-                            "field-90_4": date_to_str(first_row["無線日"]),
-                            "field-90_5": date_to_str(first_row["三方日"]),
-                            "field-90_6": date_to_str(first_row["仕上日"]),
-                            "field-90_1": date_to_str(first_row["見本納入日"]),
-                            "field-90_10": date_to_str(first_row["入品日"]),
-                            "field-90_9": clean_val(first_row["備考"]),
-                            "field-90_2": ""
-                        }
-                    })
+                for _, row in group_df.iterrows():
+                    s_idx = int(row.get("_sub_idx", 0))
+                    while len(sub90_list) <= s_idx:
+                        sub90_list.append({"record": {}})
+                    
+                    rec_dict = sub90_list[s_idx].get("record", {})
+                    rec_dict["field-90_3"] = date_to_str(row["折本日"])
+                    rec_dict["field-90_4"] = date_to_str(row["無線日"])
+                    rec_dict["field-90_5"] = date_to_str(row["三方日"])
+                    rec_dict["field-90_6"] = date_to_str(row["仕上日"])
+                    rec_dict["field-90_1"] = date_to_str(row["見本納入日"])
+                    rec_dict["field-90_10"] = date_to_str(row["入品日"])
+                    rec_dict["field-90_9"] = clean_val(row["備考"])
+                    sub90_list[s_idx]["record"] = rec_dict
+                    
                 record_payload["field-90"] = sub90_list
             else:
                 record_payload["field-90"] = orig_sub_90
 
+            # --- 2. field-88 (納品データ) の更新 (_sub_idx 対応) ---
             orig_sub_88 = original_rec.get("field-88", [])
-            sub88_list = []
+            sub88_list = copy.deepcopy(orig_sub_88)
             if source_tab == "flat":
-                row_88 = first_row
-                deliv_date_str = ""
-                deliv_date_val = row_88["納品日"]
-                if pd.notna(deliv_date_val):
-                    if isinstance(deliv_date_val, (date, datetime)):
-                        deliv_date_str = deliv_date_val.strftime("%Y-%m-%d")
-                    else:
-                        parsed_d = parse_date_safe(deliv_date_val)
-                        if parsed_d:
-                            deliv_date_str = parsed_d.strftime("%Y-%m-%d")
-
-                if isinstance(orig_sub_88, list) and len(orig_sub_88) > 0:
-                    item_88 = copy.deepcopy(orig_sub_88[0])
-                    rec_dict_88 = item_88.get("record", {})
-                    rec_dict_88["field-88_2"] = deliv_date_str
-                    rec_dict_88["field-88_4"] = clean_val(row_88["納品数"]) or "0"
-                    rec_dict_88["field-88_7"] = clean_val(row_88["PL数"]) or "0"
-                    rec_dict_88["field-88_8"] = clean_val(row_88["見本数量"]) or "0"
-                    rec_dict_88["field-88_13"] = clean_val(row_88["在庫出荷"])
-                    rec_dict_88["field-88_10"] = clean_val(row_88["配車区分"])
+                for _, row in group_df.iterrows():
+                    s_idx = int(row.get("_sub_idx", 0))
+                    while len(sub88_list) <= s_idx:
+                        sub88_list.append({"record": {}})
                     
-                    item_88["record"] = rec_dict_88
-                    sub88_list.append(item_88)
-                else:
-                    sub88_list.append({
-                        "record": {
-                            "field-88_2": deliv_date_str,
-                            "field-88_4": clean_val(first_row["納品数"]) or "0",
-                            "field-88_7": clean_val(first_row["PL数"]) or "0",
-                            "field-88_8": clean_val(first_row["見本数量"]) or "0",
-                            "field-88_13": clean_val(first_row["在庫出荷"]),
-                            "field-88_10": clean_val(first_row["配車区分"])
-                        }
-                    })
+                    deliv_date_str = ""
+                    deliv_date_val = row["納品日"]
+                    if pd.notna(deliv_date_val):
+                        if isinstance(deliv_date_val, (date, datetime)):
+                            deliv_date_str = deliv_date_val.strftime("%Y-%m-%d")
+                        else:
+                            parsed_d = parse_date_safe(deliv_date_val)
+                            if parsed_d:
+                                deliv_date_str = parsed_d.strftime("%Y-%m-%d")
+
+                    rec_dict_88 = sub88_list[s_idx].get("record", {})
+                    rec_dict_88["field-88_2"] = deliv_date_str
+                    rec_dict_88["field-88_4"] = clean_val(row["納品数"]) or "0"
+                    rec_dict_88["field-88_7"] = clean_val(row["PL数"]) or "0"
+                    rec_dict_88["field-88_8"] = clean_val(row["見本数量"]) or "0"
+                    rec_dict_88["field-88_13"] = clean_val(row["在庫出荷"])
+                    rec_dict_88["field-88_10"] = clean_val(row["配車区分"])
+                    sub88_list[s_idx]["record"] = rec_dict_88
+                    
                 record_payload["field-88"] = sub88_list
             else:
                 record_payload["field-88"] = orig_sub_88
 
+            # --- 3. field-89 (請求データ) の更新 (_sub_idx 対応) ---
             orig_sub_89 = original_rec.get("field-89", [])
-            sub89_list = []
+            sub89_list = copy.deepcopy(orig_sub_89)
             if source_tab == "flat":
-                row_89 = first_row
-                sale_date_str = ""
-                sale_date_val = row_89["売上日"]
-                if pd.notna(sale_date_val):
-                    if isinstance(sale_date_val, (date, datetime)):
-                        sale_date_str = sale_date_val.strftime("%Y-%m-%d")
-                    else:
-                        parsed_s = parse_date_safe(sale_date_val)
-                        if parsed_s:
-                            sale_date_str = parsed_s.strftime("%Y-%m-%d")
+                for _, row in group_df.iterrows():
+                    s_idx = int(row.get("_sub_idx", 0))
+                    while len(sub89_list) <= s_idx:
+                        sub89_list.append({"record": {}})
+                    
+                    sale_date_str = ""
+                    sale_date_val = row["売上日"]
+                    if pd.notna(sale_date_val):
+                        if isinstance(sale_date_val, (date, datetime)):
+                            sale_date_str = sale_date_val.strftime("%Y-%m-%d")
+                        else:
+                            parsed_s = parse_date_safe(sale_date_val)
+                            if parsed_s:
+                                sale_date_str = parsed_s.strftime("%Y-%m-%d")
 
-                if isinstance(orig_sub_89, list) and len(orig_sub_89) > 0:
-                    item_89 = copy.deepcopy(orig_sub_89[0])
-                    rec_dict_89 = item_89.get("record", {})
+                    rec_dict_89 = sub89_list[s_idx].get("record", {})
                     rec_dict_89["field-89_1"] = sale_date_str
-                    rec_dict_89["field-89_3"] = clean_val(row_89["請求数量"]) or "0"
-                    rec_dict_89["field-89_4"] = clean_val(row_89["請求単価"]) or "0"
-                    rec_dict_89["field-89_12"] = clean_val(row_89["内見本数量"]) or "0"
-                    rec_dict_89["field-89_7"] = clean_val(row_89["備考_請求"])
+                    rec_dict_89["field-89_3"] = clean_val(row["請求数量"]) or "0"
+                    rec_dict_89["field-89_4"] = clean_val(row["請求単価"]) or "0"
+                    rec_dict_89["field-89_12"] = clean_val(row["内見本数量"]) or "0"
+                    rec_dict_89["field-89_7"] = clean_val(row["備考_請求"])
                     for k in ["field-89_5", "field-89_6"]:
                         rec_dict_89.pop(k, None)
-                    item_89["record"] = rec_dict_89
-                    sub89_list.append(item_89)
-                else:
-                    sub89_list.append({
-                        "record": {
-                            "field-89_1": sale_date_str,
-                            "field-89_3": clean_val(first_row["請求数量"]) or "0",
-                            "field-89_4": clean_val(first_row["請求単価"]) or "0",
-                            "field-89_12": clean_val(first_row["内見本数量"]) or "0",
-                            "field-89_7": clean_val(first_row["備考_請求"])
-                        }
-                    })
+                    sub89_list[s_idx]["record"] = rec_dict_89
+                    
                 record_payload["field-89"] = sub89_list
             else:
                 cleaned_sub89 = []
@@ -1097,33 +1073,24 @@ if top_save_clicked or bottom_save_clicked:
                     cleaned_sub89.append(item_cp)
                 record_payload["field-89"] = cleaned_sub89
 
+            # --- 4. field-91 (付物データ) の更新 (_sub_idx 対応) ---
             orig_sub_91 = original_rec.get("field-91", [])
-            sub91_list = []
+            sub91_list = copy.deepcopy(orig_sub_91)
             if source_tab == "acc":
-                row_91 = first_row
-                if isinstance(orig_sub_91, list) and len(orig_sub_91) > 0:
-                    item_91 = copy.deepcopy(orig_sub_91[0])
-                    rec_dict_91 = item_91.get("record", {})
+                for _, row in group_df.iterrows():
+                    s_idx = int(row.get("_sub_idx", 0))
+                    while len(sub91_list) <= s_idx:
+                        sub91_list.append({"record": {}})
                     
-                    rec_dict_91["field-91_1"] = clean_val(row_91["表 日付"])
-                    rec_dict_91["field-91_5"] = clean_val(row_91["カバー 日付"])
-                    rec_dict_91["field-91_9"] = clean_val(row_91["カード 日付"])
-                    rec_dict_91["field-91_13"] = clean_val(row_91["帯 日付"])
-                    
+                    rec_dict_91 = sub91_list[s_idx].get("record", {})
+                    rec_dict_91["field-91_1"] = clean_val(row["表 日付"])
+                    rec_dict_91["field-91_5"] = clean_val(row["カバー 日付"])
+                    rec_dict_91["field-91_9"] = clean_val(row["カード 日付"])
+                    rec_dict_91["field-91_13"] = clean_val(row["帯 日付"])
                     for k in ["field-91_2", "field-91_6", "field-91_10", "field-91_14"]:
                         rec_dict_91.pop(k, None)
-                        
-                    item_91["record"] = rec_dict_91
-                    sub91_list.append(item_91)
-                else:
-                    sub91_list.append({
-                        "record": {
-                            "field-91_1": clean_val(first_row["表 日付"]),
-                            "field-91_5": clean_val(first_row["カバー 日付"]),
-                            "field-91_9": clean_val(first_row["カード 日付"]),
-                            "field-91_13": clean_val(first_row["帯 日付"])
-                        }
-                    })
+                    sub91_list[s_idx]["record"] = rec_dict_91
+                    
                 record_payload["field-91"] = sub91_list
             else:
                 cleaned_sub91 = []
