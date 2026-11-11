@@ -153,7 +153,7 @@ def to_excel_bytes(df):
     output.seek(0)
     return output
 
-# --- 受注一覧表のPDF生成（出版社8文字幅、ISBN 6文字幅に最適化） ---
+# --- 受注一覧表のPDF生成（出版社8文字幅、ISBN 6文字幅に最適化／請求チェック列除外） ---
 def generate_order_pdf(df):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=15, rightMargin=15, topMargin=15, bottomMargin=15)
@@ -169,31 +169,29 @@ def generate_order_pdf(df):
         Spacer(1, 10),
     ]
 
-    exclude_cols = ["更新", "_record_idx", "詳細", "単価", "納品日", "PL数", "見本数量", "配車区分", "納品", "在庫出荷", "売上日", "請求数量", "内見本数量"]
+    exclude_cols = ["更新", "_record_idx", "詳細", "単価", "納品日", "PL数", "見本数量", "配車区分", "納品", "在庫出荷", "売上日", "請求数量", "内見本数量", "請求"]
     target_cols = [c for c in df.columns if c not in exclude_cols]
 
     table_data = [[Paragraph(c, header_style) for c in target_cols]]
     for _, row in df.iterrows():
         table_data.append([Paragraph(str(row[c]) if pd.notna(row[c]) else "", cell_style) for c in target_cols])
 
-    # 各列の幅指定（ご要望の「出版社8文字分」「ISBN 6文字分」および日付の10桁折り返し防止を反映）
     total_width = 812
     col_widths = []
     for c in target_cols:
         if c in ["受注日", "納期", "折本日", "無線日", "三方日", "仕上日", "見本納入日", "入品日"]:
-            col_widths.append(62)  # 日付10桁が収まる幅
+            col_widths.append(62)
         elif c == "書名":
-            col_widths.append(135) # 余った幅を書名へたっぷり割り当て
+            col_widths.append(135)
         elif c == "出版社名":
-            col_widths.append(58)  # 出版社名 約8文字分の幅
+            col_widths.append(58)
         elif c == "ISBN":
-            col_widths.append(48)  # ISBN 約6文字分の幅
+            col_widths.append(48)
         elif c == "受注番号":
             col_widths.append(52)
         else:
-            col_widths.append(42)  # その他細かい列
+            col_widths.append(42)
             
-    # 合計幅が812ptになるよう微調整
     current_total = sum(col_widths)
     if current_total != total_width and len(col_widths) > 0:
         diff = (total_width - current_total) / len(col_widths)
@@ -645,7 +643,7 @@ with tab1:
                         item_89 = sub_89[i] if isinstance(sub_89, list) and len(sub_89) > i else {}
                         rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
                         
-                        val_88_10 = clean_val(rec_88.get("field-88_10", ""))
+                        val_88_13 = clean_val(rec_88.get("field-88_13", ""))
 
                         flat_data.append({
                             "更新": False,
@@ -670,7 +668,7 @@ with tab1:
                             "納品数": clean_val(rec_88.get("field-88_4", "")),
                             "PL数": clean_val(rec_88.get("field-88_7", "")),
                             "見本数量": clean_val(rec_88.get("field-88_8", "")),
-                            "配車区分": val_88_10,
+                            "配車区分": val_88_13,
                             "納品": False,
                             "在庫出荷": False,
                             "売上日": parse_date_safe(rec_89.get("field-89_1")),
@@ -739,7 +737,12 @@ with tab1:
                     "納品数": st.column_config.TextColumn("納品数", help="納品数（field-88_4）"),
                     "PL数": st.column_config.TextColumn("PL数", help="PL数（field-88_7）"),
                     "見本数量": st.column_config.TextColumn("見本数量", help="見本数量（field-88_8）"),
-                    "配車区分": st.column_config.TextColumn("配車区分", help="配車区分（field-88_10）"),
+                    "配車区分": st.column_config.SelectboxColumn(
+                        "配車区分",
+                        options=["", "在庫から"],
+                        help="「空欄」または「在庫から」を選択します（field-88_13）",
+                        required=False
+                    ),
                     "納品": st.column_config.CheckboxColumn("納品", help="チェックすると納品書発行の対象になります"),
                     "在庫出荷": st.column_config.CheckboxColumn("在庫出荷", help="チェックすると在庫出荷扱いになります"),
                     "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
@@ -1005,7 +1008,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     rec_dict_88["field-88_4"] = clean_val(row_88["納品数"]) or "0"
                     rec_dict_88["field-88_7"] = clean_val(row_88["PL数"]) or "0"
                     rec_dict_88["field-88_8"] = clean_val(row_88["見本数量"]) or "0"
-                    rec_dict_88["field-88_10"] = clean_val(row_88["配車区分"])
+                    rec_dict_88["field-88_13"] = clean_val(row_88["配車区分"])
                     
                     item_88["record"] = rec_dict_88
                     sub88_list.append(item_88)
@@ -1016,7 +1019,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
                             "field-88_4": clean_val(first_row["納品数"]) or "0",
                             "field-88_7": clean_val(first_row["PL数"]) or "0",
                             "field-88_8": clean_val(first_row["見本数量"]) or "0",
-                            "field-88_10": clean_val(first_row["配車区分"])
+                            "field-88_13": clean_val(first_row["配車区分"])
                         }
                     })
                 record_payload["field-88"] = sub88_list
