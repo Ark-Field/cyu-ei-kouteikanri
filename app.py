@@ -228,7 +228,7 @@ def generate_accessory_pdf(df):
         Spacer(1, 10),
     ]
 
-    exclude_cols = ["更新", "_record_idx"]
+    exclude_cols = ["更新", "_record_idx", "詳細"]
     target_cols = [c for c in df.columns if c not in exclude_cols]
 
     table_data = [[Paragraph(c, header_style) for c in target_cols]]
@@ -824,6 +824,9 @@ with tab_accessory:
             h_pub = clean_val(r.get("field-8", ""))
             h_title = clean_val(r.get("field-13", ""))
             
+            rec_id = clean_val(r.get("_recordId", ""))
+            detail_url = f"{POCKET_BASE_URL}/apps/{APP_ID}/records/{rec_id}/detail" if rec_id and rec_id.lower() != "none" else ""
+            
             sub_91 = r.get("field-91", [])
             max_len_91 = len(sub_91) if isinstance(sub_91, list) and len(sub_91) > 0 else 1
             
@@ -834,6 +837,7 @@ with tab_accessory:
                 acc_flat_data.append({
                     "更新": False,
                     "_record_idx": record_idx,
+                    "詳細": detail_url,
                     "受注番号": h_ord_no,
                     "受注日": h_ord_date,
                     "納期": h_due,
@@ -861,6 +865,11 @@ with tab_accessory:
             column_config={
                 "更新": st.column_config.CheckboxColumn("更新チェック", required=True, help="チェックを入れた行の付物データを@pocketに上書き保存します"),
                 "_record_idx": None,
+                "詳細": st.column_config.LinkColumn(
+                    "🔗 @pocket詳細",
+                    help="@pocketの該当データ画面へジャンプします",
+                    display_text="📝 詳細を開く"
+                ),
                 "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
                 "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD", disabled=True),
                 "納期": st.column_config.DateColumn("納期", format="YYYY-MM-DD", disabled=True),
