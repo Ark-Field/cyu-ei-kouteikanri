@@ -82,7 +82,7 @@ dark_navy_theme_css = """
 """
 st.markdown(dark_navy_theme_css, unsafe_allow_html=True)
 
-st.title("📊 受注一覧表 ＆ 付物・納品・請求管理システム")
+st.title("📊 受注一覧表日付入力 ＆ 付物納期・納品書・請求書")
 
 # ==========================================
 # 2. 日本語フォント登録処理（ReportLab用）
