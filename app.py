@@ -691,9 +691,9 @@ with tab1:
                 st.session_state["df_flat_session"] = df_temp
                 st.session_state["last_len"] = len(api_records)
 
-            # --- 一括選択・解除ボタン ---
-            st.markdown("##### ⚡ 一括チェック操作")
-            col_b1, col_b2, col_b3, col_b4, _ = st.columns([1, 1, 1, 1, 2])
+            # --- 一括選択・解除・保存ボタン（1行横並び） ---
+            st.markdown("##### ⚡ 一括チェック操作 ＆ 保存")
+            col_b1, col_b2, col_b3, col_b4, col_b5 = st.columns([1, 1, 1, 1, 1.3])
             with col_b1:
                 if st.button("☑️ 更新 全選択", key="all_update_on"):
                     st.session_state["df_flat_session"]["更新"] = True
@@ -710,6 +710,8 @@ with tab1:
                 if st.button("ロ 請求 全解除", key="all_invoice_off"):
                     st.session_state["df_flat_session"]["請求"] = False
                     st.rerun()
+            with col_b5:
+                top_save_clicked = st.button("💾 上書き保存", type="primary", key="btn_save_top")
 
             edited_flat_df = st.data_editor(
                 st.session_state["df_flat_session"],
@@ -802,10 +804,12 @@ with tab1:
         else:
             st.warning("⚠️ 該当するレコードが見つかりませんでした。")
             sample_rec = {}
+            top_save_clicked = False
             field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
     else:
         st.info("ℹ️ 検索条件を指定するか、DBから受注番号を指定してアクセスしてください。")
         sample_rec = {}
+        top_save_clicked = False
         field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
 
 # ==========================================
@@ -911,11 +915,15 @@ with tab_accessory:
         st.warning("⚠️ 表示対象の受注データがありません。タブ1で検索を行ってください。")
 
 # ==========================================
-# 共通の一括上書き保存ボタン
+# 共通の上書き保存処理（上部ボタンまたは下部ボタンから実行）
 # ==========================================
 st.divider()
 
-if st.button("💾 チェックを入れたデータを データベース に一括上書き保存する", type="primary", key="btn_save_checked_all"):
+# 下部にも常時保存ボタンを置いておきたい場合は残せますが、上部にボタンを配置したため統合可能です
+# 今回は上部の「上書き保存」ボタンが押されたとき、または従来の下部ボタンが押されたときの両方に対応します
+bottom_save_clicked = st.button("💾 チェックを入れたデータを データベース に一括上書き保存する", type="primary", key="btn_save_checked_all")
+
+if top_save_clicked or bottom_save_clicked:
     checked_rows = pd.DataFrame()
     source_tab = None
     
