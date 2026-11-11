@@ -169,7 +169,7 @@ def generate_order_pdf(df):
         Spacer(1, 10),
     ]
 
-    exclude_cols = ["更新", "_record_idx", "詳細", "単価", "納品日", "PL数", "見本数量", "配車区分", "納品", "売上日", "請求数量", "内見本数量", "請求"]
+    exclude_cols = ["更新", "_record_idx", "詳細", "単価", "納品日", "PL数", "見本数量", "在庫出荷", "配車区分", "納品", "売上日", "請求数量", "内見本数量", "請求"]
     target_cols = [c for c in df.columns if c not in exclude_cols]
 
     table_data = [[Paragraph(c, header_style) for c in target_cols]]
@@ -643,10 +643,13 @@ with tab1:
                         item_89 = sub_89[i] if isinstance(sub_89, list) and len(sub_89) > i else {}
                         rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
                         
-                        # 配車区分（field-88_10）の安全な取得・正規化（空欄 または 在庫から）
+                        # 在庫出荷（field-88_13）の安全な取得（空欄 または 在庫から）
+                        val_88_13 = clean_val(rec_88.get("field-88_13", ""))
+                        if val_88_13 != "在庫から":
+                            val_88_13 = ""
+
+                        # 配車区分（field-88_10）の安全な取得（フリーテキスト）
                         val_88_10 = clean_val(rec_88.get("field-88_10", ""))
-                        if val_88_10 != "在庫から":
-                            val_88_10 = ""
 
                         flat_data.append({
                             "更新": False,
@@ -671,6 +674,7 @@ with tab1:
                             "納品数": clean_val(rec_88.get("field-88_4", "")),
                             "PL数": clean_val(rec_88.get("field-88_7", "")),
                             "見本数量": clean_val(rec_88.get("field-88_8", "")),
+                            "在庫出荷": val_88_13,
                             "配車区分": val_88_10,
                             "納品": False,
                             "売上日": parse_date_safe(rec_89.get("field-89_1")),
@@ -739,12 +743,13 @@ with tab1:
                     "納品数": st.column_config.TextColumn("納品数", help="納品数（field-88_4）"),
                     "PL数": st.column_config.TextColumn("PL数", help="PL数（field-88_7）"),
                     "見本数量": st.column_config.TextColumn("見本数量", help="見本数量（field-88_8）"),
-                    "配車区分": st.column_config.SelectboxColumn(
-                        "配車区分",
+                    "在庫出荷": st.column_config.SelectboxColumn(
+                        "在庫出荷",
                         options=["", "在庫から"],
-                        help="「空欄」または「在庫から」を選択します（field-88_10）",
+                        help="「空欄」または「在庫から」を選択します（field-88_13）",
                         required=False
                     ),
+                    "配車区分": st.column_config.TextColumn("配車区分", help="配車区分を入力します（field-88_10）"),
                     "納品": st.column_config.CheckboxColumn("納品", help="チェックすると納品書発行の対象になります"),
                     "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
                     "請求数量": st.column_config.TextColumn("請求数量"),
@@ -759,7 +764,7 @@ with tab1:
             st.markdown("---")
             col_dl1, col_dl2 = st.columns(2)
             with col_dl1:
-                exclude_for_dl = ["単価", "納品日", "PL数", "見本数量", "配車区分", "納品", "売上日", "請求数量", "内見本数量"]
+                exclude_for_dl = ["単価", "納品日", "PL数", "見本数量", "在庫出荷", "配車区分", "納品", "売上日", "請求数量", "内見本数量"]
                 df_excel_export = edited_flat_df.drop(columns=[c for c in exclude_for_dl if c in edited_flat_df.columns])
                 excel_bytes_ord = to_excel_bytes(df_excel_export)
                 st.download_button(
@@ -1009,6 +1014,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
                     rec_dict_88["field-88_4"] = clean_val(row_88["納品数"]) or "0"
                     rec_dict_88["field-88_7"] = clean_val(row_88["PL数"]) or "0"
                     rec_dict_88["field-88_8"] = clean_val(row_88["見本数量"]) or "0"
+                    rec_dict_88["field-88_13"] = clean_val(row_88["在庫出荷"])
                     rec_dict_88["field-88_10"] = clean_val(row_88["配車区分"])
                     
                     item_88["record"] = rec_dict_88
@@ -1020,6 +1026,7 @@ if st.button("💾 チェックを入れたデータを データベース に�
                             "field-88_4": clean_val(first_row["納品数"]) or "0",
                             "field-88_7": clean_val(first_row["PL数"]) or "0",
                             "field-88_8": clean_val(first_row["見本数量"]) or "0",
+                            "field-88_13": clean_val(first_row["在庫出荷"]),
                             "field-88_10": clean_val(first_row["配車区分"])
                         }
                     })
