@@ -169,7 +169,7 @@ def generate_order_pdf(df):
         Spacer(1, 10),
     ]
 
-    exclude_cols = ["更新", "_record_idx", "詳細", "単価", "納品日", "PL数", "見本数量", "配車区分", "納品", "在庫出荷", "売上日", "請求数量", "内見本数量", "請求"]
+    exclude_cols = ["更新", "_record_idx", "詳細", "単価", "納品日", "PL数", "見本数量", "配車区分", "納品", "売上日", "請求数量", "内見本数量", "請求"]
     target_cols = [c for c in df.columns if c not in exclude_cols]
 
     table_data = [[Paragraph(c, header_style) for c in target_cols]]
@@ -643,7 +643,10 @@ with tab1:
                         item_89 = sub_89[i] if isinstance(sub_89, list) and len(sub_89) > i else {}
                         rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
                         
+                        # 配車区分（field-88_10）の安全な取得・正規化（空欄 または 在庫から）
                         val_88_10 = clean_val(rec_88.get("field-88_10", ""))
+                        if val_88_10 != "在庫から":
+                            val_88_10 = ""
 
                         flat_data.append({
                             "更新": False,
@@ -670,7 +673,6 @@ with tab1:
                             "見本数量": clean_val(rec_88.get("field-88_8", "")),
                             "配車区分": val_88_10,
                             "納品": False,
-                            "在庫出荷": False,
                             "売上日": parse_date_safe(rec_89.get("field-89_1")),
                             "請求数量": clean_val(rec_89.get("field-89_3", "")),
                             "内見本数量": clean_val(rec_89.get("field-89_12", "")),
@@ -744,7 +746,6 @@ with tab1:
                         required=False
                     ),
                     "納品": st.column_config.CheckboxColumn("納品", help="チェックすると納品書発行の対象になります"),
-                    "在庫出荷": st.column_config.CheckboxColumn("在庫出荷", help="チェックすると在庫出荷扱いになります"),
                     "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
                     "請求数量": st.column_config.TextColumn("請求数量"),
                     "内見本数量": st.column_config.TextColumn("内見本数量", help="内見本数量（field-89_12）"),
@@ -758,7 +759,7 @@ with tab1:
             st.markdown("---")
             col_dl1, col_dl2 = st.columns(2)
             with col_dl1:
-                exclude_for_dl = ["単価", "納品日", "PL数", "見本数量", "配車区分", "納品", "在庫出荷", "売上日", "請求数量", "内見本数量"]
+                exclude_for_dl = ["単価", "納品日", "PL数", "見本数量", "配車区分", "納品", "売上日", "請求数量", "内見本数量"]
                 df_excel_export = edited_flat_df.drop(columns=[c for c in exclude_for_dl if c in edited_flat_df.columns])
                 excel_bytes_ord = to_excel_bytes(df_excel_export)
                 st.download_button(
