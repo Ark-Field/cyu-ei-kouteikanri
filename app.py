@@ -153,61 +153,74 @@ def to_excel_bytes(df):
     output.seek(0)
     return output
 
-# --- 受注一覧表のPDF生成 ---
+# --- 受注一覧表のPDF生成（出版社ごとに自動改ページ＆分類表示） ---
 def generate_order_pdf(df):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=15, rightMargin=15, topMargin=15, bottomMargin=15)
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=14, leading=16, textColor=colors.HexColor("#1E3A8A"))
+    pub_header_style = ParagraphStyle("PubHeader", parent=styles["Normal"], fontName=FONT_NAME, fontSize=10, leading=12, textColor=colors.HexColor("#1E3A8A"), spaceBefore=4, spaceAfter=4)
     header_style = ParagraphStyle("Header", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7.5, leading=9, textColor=colors.white, alignment=1)
     cell_style = ParagraphStyle("Cell", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7, leading=8.5, textColor=colors.HexColor("#1E293B"))
 
     elements = [
-        Paragraph("<b>受注一覧表 ＆ 工程・納品・請求管理</b>", title_style),
-        Spacer(1, 6),
+        Paragraph("<b>受注一覧表 ＆ 工程・納品・請求管理（顧客別・判型別・納期順）</b>", title_style),
+        Spacer(1, 4),
         Paragraph(f"<font size=8 color='#64748B'>発行日: {date.today().strftime('%Y年%m月%d日')}</font>", styles["Normal"]),
-        Spacer(1, 10),
+        Spacer(1, 8),
     ]
 
-    exclude_cols = ["更新", "_record_idx", "_sub_idx", "詳細", "単価", "納品日", "PL数", "見本数量", "在庫出荷", "配車区分", "納品", "売上日", "請求数量", "請求単価", "内見本数量", "請求"]
+    exclude_cols = ["更新", "_record_idx", "_sub_idx", "詳細", "単価", "納品日", "PL数", "見本数量", "在庫出荷", "配車区分", "納品", "売上日", "請求数量", "請求単価", "内見本数量", "請求", "出版社名"]
     target_cols = [c for c in df.columns if c not in exclude_cols]
 
-    table_data = [[Paragraph(c, header_style) for c in target_cols]]
-    for _, row in df.iterrows():
-        table_data.append([Paragraph(str(row[c]) if pd.notna(row[c]) else "", cell_style) for c in target_cols])
+    # 出版社（顧客）ごとにグループ化してページ分け
+    publishers = df["出版社名"].unique() if "出版社名" in df.columns else [""]
+    for idx, pub in enumerate(publishers):
+        if idx > 0:
+            elements.append(PageBreak())
+        
+        pub_name_display = pub if pub else "（出版社名未設定）"
+        elements.append(Paragraph(f"<b>■ 出版社: {pub_name_display} 御中</b>", pub_header_style))
+        
+        sub_df = df[df["出版社名"] == pub] if pub else df
 
-    total_width = 812
-    col_widths = []
-    for c in target_cols:
-        if c in ["受注日", "納期", "折本日", "無線日", "三方日", "仕上日", "見本納入日", "入品日"]:
-            col_widths.append(62)
-        elif c == "書名":
-            col_widths.append(135)
-        elif c == "出版社名":
-            col_widths.append(58)
-        elif c == "ISBN":
-            col_widths.append(48)
-        elif c == "受注番号":
-            col_widths.append(52)
-        else:
-            col_widths.append(42)
-            
-    current_total = sum(col_widths)
-    if current_total != total_width and len(col_widths) > 0:
-        diff = (total_width - current_total) / len(col_widths)
-        col_widths = [w + diff for w in col_widths]
+        table_data = [[Paragraph(c, header_style) for c in target_cols]]
+        for _, row in sub_df.iterrows():
+            table_data.append([Paragraph(str(row[c]) if pd.notna(row[c]) else "", cell_style) for c in target_cols])
 
-    t = Table(table_data, colWidths=col_widths, repeatRows=1)
-    t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
-        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
-    ]))
+        total_width = 812
+        col_widths = []
+        for c in target_cols:
+            if c in ["受注日", "納期", "折本日", "無線日", "三方日", "仕上日", "見本納入日", "入品日"]:
+                col_widths.append(58)
+            elif c == "書名":
+                col_widths.append(125)
+            elif c == "判型":
+                col_widths.append(48)
+            elif c == "ISBN":
+                col_widths.append(52)
+            elif c == "受注番号":
+                col_widths.append(52)
+            else:
+                col_widths.append(42)
+                
+        current_total = sum(col_widths)
+        if current_total != total_width and len(col_widths) > 0:
+            diff = (total_width - current_total) / len(col_widths)
+            col_widths = [w + diff for w in col_widths]
 
-    elements.append(t)
+        t = Table(table_data, colWidths=col_widths, repeatRows=1)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
+            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
+        ]))
+        elements.append(t)
+        elements.append(Spacer(1, 8))
+
     doc.build(elements)
     buffer.seek(0)
     return buffer
@@ -427,8 +440,8 @@ def generate_invoice_pdf(grouped_invoice_dict, bank_info):
         inv_table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1,-1), 5),
+            ("TOPPADDING", (0, 0), (-1,-1), 5),
             ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
         ]))
         elements.append(inv_table)
@@ -618,6 +631,7 @@ with tab1:
                     h_due = parse_date_safe(r.get("field-52"))
                     h_pub = clean_val(r.get("field-8", ""))
                     h_title = clean_val(r.get("field-13", ""))
+                    h_format = clean_val(r.get("field-23", ""))  # 判型 (field-23)
                     h_isbn = clean_val(r.get("field-93", ""))
                     h_qty = clean_val(r.get("field-4", ""))
                     h_price = clean_val(r.get("field-5", ""))
@@ -630,8 +644,8 @@ with tab1:
                     sub_89 = r.get("field-89", [])
                     
                     max_len = max(len(sub_90) if isinstance(sub_90, list) else 0,
-                                  len(sub_88) if isinstance(sub_88, list) else 0,
-                                  len(sub_89) if isinstance(sub_89, list) else 0, 1)
+                                    len(sub_88) if isinstance(sub_88, list) else 0,
+                                    len(sub_89) if isinstance(sub_89, list) else 0, 1)
                     
                     for i in range(max_len):
                         item_90 = sub_90[i] if isinstance(sub_90, list) and len(sub_90) > i else {}
@@ -659,6 +673,7 @@ with tab1:
                             "納期": h_due,
                             "出版社名": h_pub,
                             "書名": h_title,
+                            "判型": h_format,
                             "ISBN": h_isbn,
                             "製本数": h_qty,
                             "単価": h_price,
@@ -685,8 +700,16 @@ with tab1:
                         })
                 
                 df_temp = pd.DataFrame(flat_data)
-                if "納期" in df_temp.columns:
-                    df_temp = df_temp.sort_values(by="納期", ascending=True, na_position="last").reset_index(drop=True)
+                # ★ 顧客別（出版社名）→ 判型別 → 納期順 のマルチソート
+                sort_keys = ["出版社名", "判型", "納期"]
+                sort_ascending = [True, True, True]
+                available_sort_keys = [k for k in sort_keys if k in df_temp.columns]
+                if available_sort_keys:
+                    df_temp = df_temp.sort_values(
+                        by=available_sort_keys, 
+                        ascending=sort_ascending[:len(available_sort_keys)], 
+                        na_position="last"
+                    ).reset_index(drop=True)
                 
                 st.session_state["df_flat_session"] = df_temp
                 st.session_state["last_len"] = len(api_records)
@@ -732,6 +755,7 @@ with tab1:
                     "納期": st.column_config.DateColumn("納期", format="YYYY-MM-DD", disabled=True),
                     "出版社名": st.column_config.TextColumn("出版社名", disabled=True),
                     "書名": st.column_config.TextColumn("書名", disabled=True),
+                    "判型": st.column_config.TextColumn("判型", disabled=True, help="判型 (field-23)"),
                     "ISBN": st.column_config.TextColumn("ISBN", disabled=True, help="ISBN番号 (field-93)"),
                     "製本数": st.column_config.TextColumn("製本数", disabled=True),
                     "単価": st.column_config.TextColumn("単価", disabled=True),
