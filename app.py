@@ -9,7 +9,7 @@ import streamlit as st
 
 # ReportLab関連のインポート（PDF出力用）
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A3, landscape, portrait
+from reportlab.lib.pagesizes import A3, A4, landscape, portrait
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
@@ -689,7 +689,7 @@ with tab1:
                         val_88_10 = clean_val(rec_88.get("field-88_10", ""))
 
                         h_printer = clean_val(r.get("field-14", ""))  # 印刷所 (field-14)
-                        h_folding = clean_val(r.get("field-16", ""))  # 折 (field-16) ★修正済
+                        h_folding = clean_val(r.get("field-16", ""))  # 折 (field-16)
 
                         flat_data.append({
                             "更新": False,
