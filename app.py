@@ -158,8 +158,8 @@ def to_excel_bytes(df):
     output.seek(0)
     return output
 
-# --- 受注一覧表のPDF生成（A3横サイズ対応・出版社ごとに自動改ページ） ---
-def generate_order_pdf(df):
+# --- 受注一覧表のPDF生成（グループ軸・書名直後のISBN/判型/総頁数に対応） ---
+def generate_order_pdf(df, group_type="publisher"):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A3), leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
     styles = getSampleStyleSheet()
@@ -168,25 +168,35 @@ def generate_order_pdf(df):
     header_style = ParagraphStyle("Header", parent=styles["Normal"], fontName=FONT_NAME, fontSize=8, leading=10, textColor=colors.white, alignment=1)
     cell_style = ParagraphStyle("Cell", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7.5, leading=9.5, textColor=colors.HexColor("#1E293B"))
 
+    group_label_text = "顧客グループ別（出版社順）" if group_type == "publisher" else "判型グループ別（判型順）"
     elements = [
-        Paragraph("<b>受注一覧表 ＆ 工程・納品・請求管理（顧客別・判型別・納期順）</b>", title_style),
+        Paragraph(f"<b>受注一覧表 ＆ 工程・納品・請求管理（{group_label_text}）</b>", title_style),
         Spacer(1, 4),
         Paragraph(f"<font size=8 color='#64748B'>発行日: {date.today().strftime('%Y年%m月%d日')}</font>", styles["Normal"]),
         Spacer(1, 8),
     ]
 
-    exclude_cols = ["更新", "_record_idx", "_sub_idx", "詳細", "単価", "納品日", "PL数", "見本数量", "在庫出荷", "配車区分", "納品", "売上日", "請求数量", "請求単価", "内見本数量", "請求", "出版社名"]
-    target_cols = [c for c in df.columns if c not in exclude_cols]
+    # ご指定のPDF用並び順（書名の後ろに ISBN, 判型, 総頁数）
+    pdf_target_cols = [
+        "受注番号", "受注日", "納期", "納期上/中/下", "急ぎ",
+        "書名", "ISBN", "判型", "総頁数", "出版社名", "製本数", "製品預かり", "32P", "16P", "8P", "4P", "2P",
+        "印刷所", "折", "折本日", "無線日", "三方日", "仕上日", "見本納入日", "入品日", "備考"
+    ]
+    target_cols = [c for c in pdf_target_cols if c in df.columns]
 
-    publishers = df["出版社名"].unique() if "出版社名" in df.columns else [""]
-    for idx, pub in enumerate(publishers):
+    # グループ分けのキー決定
+    group_col = "出版社名" if group_type == "publisher" else "判型"
+    groups = df[group_col].unique() if group_col in df.columns else [""]
+
+    for idx, g_val in enumerate(groups):
         if idx > 0:
             elements.append(PageBreak())
         
-        pub_name_display = pub if pub else "（出版社名未設定）"
-        elements.append(Paragraph(f"<b>■ 出版社: {pub_name_display} 御中</b>", pub_header_style))
+        g_name_display = g_val if g_val else "（未設定）"
+        header_title_str = f"■ 出版社: {g_name_display} 御中" if group_type == "publisher" else f"■ 判型: {g_name_display}"
+        elements.append(Paragraph(f"<b>{header_title_str}</b>", pub_header_style))
         
-        sub_df = df[df["出版社名"] == pub] if pub else df
+        sub_df = df[df[group_col] == g_val] if g_val else df
 
         table_data = [[Paragraph(c, header_style) for c in target_cols]]
         for _, row in sub_df.iterrows():
@@ -203,9 +213,9 @@ def generate_order_pdf(df):
                 col_widths.append(38)
             elif c == "印刷所":
                 col_widths.append(50)
-            elif c == "備考" or c == "備考_請求":
+            elif c == "備考":
                 col_widths.append(85)
-            elif c == "ISBN":
+            elif c in ["ISBN", "判型"]:
                 col_widths.append(55)
             elif c == "受注番号":
                 col_widths.append(55)
@@ -234,16 +244,18 @@ def generate_order_pdf(df):
     return buffer
 
 # --- 付物明細一覧表のPDF生成 ---
-def generate_accessory_pdf(df):
+def generate_accessory_pdf(df, group_type="publisher"):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=14, leading=16, textColor=colors.HexColor("#1E3A8A"))
+    pub_header_style = ParagraphStyle("PubHeader", parent=styles["Normal"], fontName=FONT_NAME, fontSize=10, leading=13, textColor=colors.HexColor("#1E3A8A"), spaceBefore=4, spaceAfter=4)
     header_style = ParagraphStyle("Header", parent=styles["Normal"], fontName=FONT_NAME, fontSize=8, leading=10, textColor=colors.white, alignment=1)
     cell_style = ParagraphStyle("Cell", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7.5, leading=9, textColor=colors.HexColor("#1E293B"))
 
+    group_label_text = "顧客グループ別" if group_type == "publisher" else "判型グループ別"
     elements = [
-        Paragraph("<b>付物明細一覧表（表・カバー・帯・カード）</b>", title_style),
+        Paragraph(<b>付物明細一覧表（表・カバー・帯・カード / {group_label_text}）</b>, title_style),
         Spacer(1, 6),
         Paragraph(f"<font size=8 color='#64748B'>発行日: {date.today().strftime('%Y年%m月%d日')}</font>", styles["Normal"]),
         Spacer(1, 10),
@@ -252,22 +264,36 @@ def generate_accessory_pdf(df):
     exclude_cols = ["更新", "_record_idx", "_sub_idx", "詳細"]
     target_cols = [c for c in df.columns if c not in exclude_cols]
 
-    table_data = [[Paragraph(c, header_style) for c in target_cols]]
-    for _, row in df.iterrows():
-        table_data.append([Paragraph(str(row[c]) if pd.notna(row[c]) else "", cell_style) for c in target_cols])
+    group_col = "出版社名" if group_type == "publisher" else "判型"
+    groups = df[group_col].unique() if group_col in df.columns else [""]
 
-    col_w = 772 / len(target_cols)
-    t = Table(table_data, colWidths=[col_w] * len(target_cols), repeatRows=1)
-    t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
-        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
-    ]))
+    for idx, g_val in enumerate(groups):
+        if idx > 0:
+            elements.append(PageBreak())
+        
+        g_name_display = g_val if g_val else "（未設定）"
+        header_title_str = f"■ 出版社: {g_name_display} 御中" if group_type == "publisher" else f"■ 判型: {g_name_display}"
+        elements.append(Paragraph(f"<b>{header_title_str}</b>", pub_header_style))
 
-    elements.append(t)
+        sub_df = df[df[group_col] == g_val] if g_val else df
+
+        table_data = [[Paragraph(c, header_style) for c in target_cols]]
+        for _, row in sub_df.iterrows():
+            table_data.append([Paragraph(str(row[c]) if pd.notna(row[c]) else "", cell_style) for c in target_cols])
+
+        col_w = 772 / len(target_cols)
+        t = Table(table_data, colWidths=[col_w] * len(target_cols), repeatRows=1)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
+            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
+        ]))
+        elements.append(t)
+        elements.append(Spacer(1, 6))
+
     doc.build(elements)
     buffer.seek(0)
     return buffer
@@ -701,18 +727,18 @@ with tab1:
                             "納期": h_due,
                             "納期上/中/下": val_102,
                             "急ぎ": val_103,
+                            "出版社名": h_pub,
+                            "書名": h_title,
+                            "ISBN": h_isbn,
+                            "判型": h_format,
                             "総頁数": h_total_pages,
+                            "製本数": h_qty,
                             "製品預かり": h_cust_keeping,
                             "32P": h_p32,
                             "16P": h_p16,
                             "8P": h_p8,
                             "4P": h_p4,
                             "2P": h_p2,
-                            "出版社名": h_pub,
-                            "書名": h_title,
-                            "判型": h_format,
-                            "ISBN": h_isbn,
-                            "製本数": h_qty,
                             "単価": h_price,
                             "印刷所": h_printer,
                             "折": h_folding,
@@ -739,6 +765,16 @@ with tab1:
                         })
                 
                 df_temp = pd.DataFrame(flat_data)
+                
+                # アプリ画面の列並び順（ご指定の構成）
+                screen_columns = [
+                    "更新", "詳細", "受注番号", "受注日", "納期", "納期上/中/下", "急ぎ",
+                    "出版社名", "書名", "ISBN", "判型", "総頁数", "製本数", "製品預かり", "32P", "16P", "8P", "4P", "2P", "単価",
+                    "印刷所", "折", "折本日", "無線日", "三方日", "仕上日", "見本納入日", "入品日", "備考",
+                    "納品日", "納品数", "PL数", "見本数量", "在庫出荷", "配車区分", "納品", "売上日", "請求数量", "請求単価", "内見本数量", "備考_請求", "請求"
+                ]
+                df_temp = df_temp[[col for col in screen_columns if col in df_temp.columns]]
+
                 sort_keys = ["出版社名", "判型", "納期"]
                 sort_ascending = [True, True, True]
                 available_sort_keys = [k for k in sort_keys if k in df_temp.columns]
@@ -800,18 +836,18 @@ with tab1:
                         options=["", "急"],
                         help="急ぎ案件の場合は「急」を選択します (field-103)"
                     ),
+                    "出版社名": st.column_config.TextColumn("出版社名", disabled=True),
+                    "書名": st.column_config.TextColumn("書名", disabled=True),
+                    "ISBN": st.column_config.TextColumn("ISBN", disabled=True, help="ISBN番号 (field-93)"),
+                    "判型": st.column_config.TextColumn("判型", disabled=True, help="判型 (field-23)"),
                     "総頁数": st.column_config.TextColumn("総頁数", disabled=True, help="総頁数 (field-82)"),
+                    "製本数": st.column_config.TextColumn("製本数", disabled=True),
                     "製品預かり": st.column_config.TextColumn("製品預かり", disabled=True, help="製品預かり (field-81)"),
                     "32P": st.column_config.TextColumn("32P", disabled=True, help="32P (field-30)"),
                     "16P": st.column_config.TextColumn("16P", disabled=True, help="16P (field-31)"),
                     "8P": st.column_config.TextColumn("8P", disabled=True, help="8P (field-32)"),
                     "4P": st.column_config.TextColumn("4P", disabled=True, help="4P (field-33)"),
                     "2P": st.column_config.TextColumn("2P", disabled=True, help="2P (field-34)"),
-                    "出版社名": st.column_config.TextColumn("出版社名", disabled=True),
-                    "書名": st.column_config.TextColumn("書名", disabled=True),
-                    "判型": st.column_config.TextColumn("判型", disabled=True, help="判型 (field-23)"),
-                    "ISBN": st.column_config.TextColumn("ISBN", disabled=True, help="ISBN番号 (field-93)"),
-                    "製本数": st.column_config.TextColumn("製本数", disabled=True),
                     "単価": st.column_config.TextColumn("単価", disabled=True),
                     "印刷所": st.column_config.TextColumn("印刷所", disabled=True, help="印刷所 (field-14)"),
                     "折": st.column_config.TextColumn("折", disabled=True, help="折 (field-16)"),
@@ -846,10 +882,24 @@ with tab1:
             st.session_state["df_flat_session"] = edited_flat_df
 
             st.markdown("---")
+            st.markdown("##### 🖨️ 受注一覧表 出力設定（グループ軸の選択）")
+            order_group_choice = st.radio(
+                "受注一覧表のグループ軸を選択してください",
+                options=["① 顧客グループ別（出版社順）", "② 判型グループ別（判型順）"],
+                horizontal=True,
+                key="ord_group_choice"
+            )
+            ord_group_type = "publisher" if "①" in order_group_choice else "format"
+
             col_dl1, col_dl2 = st.columns(2)
             with col_dl1:
-                exclude_for_dl = ["単価", "納品日", "PL数", "見本数量", "在庫出荷", "配車区分", "納品", "売上日", "請求数量", "請求単価", "内見本数量"]
-                df_excel_export = edited_flat_df.drop(columns=[c for c in exclude_for_dl if c in edited_flat_df.columns])
+                # Excel出力用（ご指定の並び順）
+                excel_target_cols = [
+                    "受注番号", "受注日", "納期", "納期上/中/下", "急ぎ",
+                    "書名", "ISBN", "判型", "総頁数", "出版社名", "製本数", "製品預かり", "32P", "16P", "8P", "4P", "2P",
+                    "印刷所", "折", "折本日", "無線日", "三方日", "仕上日", "見本納入日", "入品日", "備考"
+                ]
+                df_excel_export = edited_flat_df[[c for c in excel_target_cols if c in edited_flat_df.columns]]
                 excel_bytes_ord = to_excel_bytes(df_excel_export)
                 st.download_button(
                     label="📥 受注一覧表を Excel でダウンロード",
@@ -859,11 +909,11 @@ with tab1:
                     key="dl_excel_order"
                 )
             with col_dl2:
-                pdf_bytes_ord = generate_order_pdf(edited_flat_df)
+                pdf_bytes_ord = generate_order_pdf(edited_flat_df, group_type=ord_group_type)
                 st.download_button(
-                    label="🖨️ 受注一覧表を A3 PDF でダウンロード",
+                    label=f"🖨️ 受注一覧表を A3 PDF でダウンロード（{order_group_choice}）",
                     data=pdf_bytes_ord,
-                    file_name=f"受注一覧表_{date.today().strftime('%Y%m%d')}.pdf",
+                    file_name=f"受注一覧表_{ord_group_type}_{date.today().strftime('%Y%m%d')}.pdf",
                     mime="application/pdf",
                     key="dl_pdf_order"
                 )
@@ -909,6 +959,7 @@ with tab_accessory:
             h_due = parse_date_safe(r.get("field-52"))
             h_pub = clean_val(r.get("field-8", ""))
             h_title = clean_val(r.get("field-13", ""))
+            h_format = clean_val(r.get("field-23", ""))
             
             rec_id = clean_val(r.get("_recordId", ""))
             detail_url = f"{POCKET_BASE_URL}/apps/{APP_ID}/records/{rec_id}/detail" if rec_id and rec_id.lower() != "none" else ""
@@ -929,6 +980,7 @@ with tab_accessory:
                     "受注日": h_ord_date,
                     "納期": h_due,
                     "出版社名": h_pub,
+                    "判型": h_format,
                     "書名": h_title,
                     "表 日付": parse_date_safe(rec_91.get("field-91_1")),
                     "表 印刷所": clean_val(rec_91.get("field-91_2", "")),
@@ -962,6 +1014,7 @@ with tab_accessory:
                 "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD", disabled=True),
                 "納期": st.column_config.DateColumn("納期", format="YYYY-MM-DD", disabled=True),
                 "出版社名": st.column_config.TextColumn("出版社名", disabled=True),
+                "判型": st.column_config.TextColumn("判型", disabled=True),
                 "書名": st.column_config.TextColumn("書名", disabled=True),
                 "表 日付": st.column_config.DateColumn("表 日付", format="YYYY-MM-DD"),
                 "表 印刷所": st.column_config.TextColumn("表 印刷所", disabled=True),
@@ -975,6 +1028,15 @@ with tab_accessory:
         )
 
         st.markdown("---")
+        st.markdown("##### 🖨️ 付物明細 出力設定（グループ軸の選択）")
+        acc_group_choice = st.radio(
+            "付物明細のグループ軸を選択してください",
+            options=["① 顧客グループ別（出版社順）", "② 判型グループ別（判型順）"],
+            horizontal=True,
+            key="acc_group_choice"
+        )
+        acc_group_type = "publisher" if "①" in acc_group_choice else "format"
+
         col_dl3, col_dl4 = st.columns(2)
         with col_dl3:
             excel_bytes_acc = to_excel_bytes(edited_acc_df)
@@ -986,11 +1048,11 @@ with tab_accessory:
                 key="dl_excel_acc"
             )
         with col_dl4:
-            pdf_bytes_acc = generate_accessory_pdf(edited_acc_df)
+            pdf_bytes_acc = generate_accessory_pdf(edited_acc_df, group_type=acc_group_type)
             st.download_button(
-                label="🖨️ 付物明細一覧表を PDF でダウンロード",
+                label=f"🖨️ 付物明細一覧表を PDF でダウンロード（{acc_group_choice}）",
                 data=pdf_bytes_acc,
-                file_name=f"付物明細一覧表_{date.today().strftime('%Y%m%d')}.pdf",
+                file_name=f"付物明細一覧表_{acc_group_type}_{date.today().strftime('%Y%m%d')}.pdf",
                 mime="application/pdf",
                 key="dl_pdf_acc"
             )
