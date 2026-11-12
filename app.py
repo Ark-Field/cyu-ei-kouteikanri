@@ -9,7 +9,7 @@ import streamlit as st
 
 # ReportLab関連のインポート（PDF出力用）
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, landscape, portrait
+from reportlab.lib.pagesizes import A3, landscape, portrait
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
@@ -158,15 +158,15 @@ def to_excel_bytes(df):
     output.seek(0)
     return output
 
-# --- 受注一覧表のPDF生成（出版社ごとに自動改ページ＆分類表示） ---
+# --- 受注一覧表のPDF生成（A3横サイズ対応・出版社ごとに自動改ページ） ---
 def generate_order_pdf(df):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=15, rightMargin=15, topMargin=15, bottomMargin=15)
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A3), leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=14, leading=16, textColor=colors.HexColor("#1E3A8A"))
-    pub_header_style = ParagraphStyle("PubHeader", parent=styles["Normal"], fontName=FONT_NAME, fontSize=10, leading=12, textColor=colors.HexColor("#1E3A8A"), spaceBefore=4, spaceAfter=4)
-    header_style = ParagraphStyle("Header", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7.5, leading=9, textColor=colors.white, alignment=1)
-    cell_style = ParagraphStyle("Cell", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7, leading=8.5, textColor=colors.HexColor("#1E293B"))
+    title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=16, leading=18, textColor=colors.HexColor("#1E3A8A"))
+    pub_header_style = ParagraphStyle("PubHeader", parent=styles["Normal"], fontName=FONT_NAME, fontSize=11, leading=14, textColor=colors.HexColor("#1E3A8A"), spaceBefore=6, spaceAfter=6)
+    header_style = ParagraphStyle("Header", parent=styles["Normal"], fontName=FONT_NAME, fontSize=8, leading=10, textColor=colors.white, alignment=1)
+    cell_style = ParagraphStyle("Cell", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7.5, leading=9.5, textColor=colors.HexColor("#1E293B"))
 
     elements = [
         Paragraph("<b>受注一覧表 ＆ 工程・納品・請求管理（顧客別・判型別・納期順）</b>", title_style),
@@ -192,21 +192,25 @@ def generate_order_pdf(df):
         for _, row in sub_df.iterrows():
             table_data.append([Paragraph(str(row[c]) if pd.notna(row[c]) else "", cell_style) for c in target_cols])
 
-        total_width = 812
+        total_width = 1151
         col_widths = []
         for c in target_cols:
             if c in ["受注日", "納期", "折本日", "無線日", "三方日", "仕上日", "見本納入日", "入品日"]:
-                col_widths.append(55)
+                col_widths.append(60)
             elif c == "書名":
-                col_widths.append(115)
-            elif c == "判型" or c == "納期上/中/下" or c == "急ぎ":
-                col_widths.append(42)
-            elif c == "ISBN":
-                col_widths.append(48)
-            elif c == "受注番号":
+                col_widths.append(130)
+            elif c in ["総頁数", "製品預かり", "32P", "16P", "8P", "4P", "2P", "折", "納期上/中/下", "急ぎ"]:
+                col_widths.append(38)
+            elif c == "印刷所":
                 col_widths.append(50)
+            elif c == "備考" or c == "備考_請求":
+                col_widths.append(85)
+            elif c == "ISBN":
+                col_widths.append(55)
+            elif c == "受注番号":
+                col_widths.append(55)
             else:
-                col_widths.append(40)
+                col_widths.append(45)
                 
         current_total = sum(col_widths)
         if current_total != total_width and len(col_widths) > 0:
@@ -633,11 +637,7 @@ with tab1:
                     h_ord_no = clean_val(r.get("field-2", ""))
                     h_ord_date = parse_date_safe(r.get("field-1"))
                     h_due = parse_date_safe(r.get("field-52"))
-                    h_pub = clean_val(r.get("field-8", ""))
-                    h_title = clean_val(r.get("field-13", ""))
-                    h_format = clean_val(r.get("field-23", ""))  # 判型 (field-23)
                     
-                    # 新規追加フィールドの取得
                     val_102 = clean_val(r.get("field-102", ""))
                     if val_102 not in ["", "確定", "上旬", "中旬", "下旬"]:
                         val_102 = ""
@@ -646,6 +646,17 @@ with tab1:
                     if val_103 not in ["", "急"]:
                         val_103 = ""
 
+                    h_total_pages = clean_val(r.get("field-82", ""))   # 総頁数 (field-82)
+                    h_cust_keeping = clean_val(r.get("field-81", ""))  # 製品預かり (field-81)
+                    h_p32 = clean_val(r.get("field-30", ""))           # 32P (field-30)
+                    h_p16 = clean_val(r.get("field-31", ""))           # 16P (field-31)
+                    h_p8 = clean_val(r.get("field-32", ""))            # 8P (field-32)
+                    h_p4 = clean_val(r.get("field-33", ""))            # 4P (field-33)
+                    h_p2 = clean_val(r.get("field-34", ""))            # 2P (field-34)
+
+                    h_pub = clean_val(r.get("field-8", ""))
+                    h_title = clean_val(r.get("field-13", ""))
+                    h_format = clean_val(r.get("field-23", ""))        # 判型
                     h_isbn = clean_val(r.get("field-93", ""))
                     h_qty = clean_val(r.get("field-4", ""))
                     h_price = clean_val(r.get("field-5", ""))
@@ -677,22 +688,34 @@ with tab1:
 
                         val_88_10 = clean_val(rec_88.get("field-88_10", ""))
 
+                        h_printer = clean_val(r.get("field-14", ""))  # 印刷所 (field-14)
+                        h_folding = clean_val(r.get("field-16", ""))  # 折 (field-16) ★修正済
+
                         flat_data.append({
                             "更新": False,
                             "_record_idx": record_idx,
-                            "_sub_idx": i,  # ★ サブテーブル上の行インデックスを保持
+                            "_sub_idx": i,
                             "詳細": detail_url,
                             "受注番号": h_ord_no,
                             "受注日": h_ord_date,
                             "納期": h_due,
                             "納期上/中/下": val_102,
                             "急ぎ": val_103,
+                            "総頁数": h_total_pages,
+                            "製品預かり": h_cust_keeping,
+                            "32P": h_p32,
+                            "16P": h_p16,
+                            "8P": h_p8,
+                            "4P": h_p4,
+                            "2P": h_p2,
                             "出版社名": h_pub,
                             "書名": h_title,
                             "判型": h_format,
                             "ISBN": h_isbn,
                             "製本数": h_qty,
                             "単価": h_price,
+                            "印刷所": h_printer,
+                            "折": h_folding,
                             "折本日": parse_date_safe(rec_90.get("field-90_3")),
                             "無線日": parse_date_safe(rec_90.get("field-90_4")),
                             "三方日": parse_date_safe(rec_90.get("field-90_5")),
@@ -716,7 +739,6 @@ with tab1:
                         })
                 
                 df_temp = pd.DataFrame(flat_data)
-                # ★ 顧客別（出版社名）→ 判型別 → 納期順 のマルチソート
                 sort_keys = ["出版社名", "判型", "納期"]
                 sort_ascending = [True, True, True]
                 available_sort_keys = [k for k in sort_keys if k in df_temp.columns]
@@ -730,7 +752,6 @@ with tab1:
                 st.session_state["df_flat_session"] = df_temp
                 st.session_state["last_len"] = len(api_records)
 
-            # --- 一括選択・解除・保存ボタン（1行横並び） ---
             st.markdown("##### ⚡ 一括チェック操作 ＆ 保存")
             col_b1, col_b2, col_b3, col_b4, col_b5 = st.columns([1, 1, 1, 1, 1.3])
             with col_b1:
@@ -779,19 +800,28 @@ with tab1:
                         options=["", "急"],
                         help="急ぎ案件の場合は「急」を選択します (field-103)"
                     ),
+                    "総頁数": st.column_config.TextColumn("総頁数", disabled=True, help="総頁数 (field-82)"),
+                    "製品預かり": st.column_config.TextColumn("製品預かり", disabled=True, help="製品預かり (field-81)"),
+                    "32P": st.column_config.TextColumn("32P", disabled=True, help="32P (field-30)"),
+                    "16P": st.column_config.TextColumn("16P", disabled=True, help="16P (field-31)"),
+                    "8P": st.column_config.TextColumn("8P", disabled=True, help="8P (field-32)"),
+                    "4P": st.column_config.TextColumn("4P", disabled=True, help="4P (field-33)"),
+                    "2P": st.column_config.TextColumn("2P", disabled=True, help="2P (field-34)"),
                     "出版社名": st.column_config.TextColumn("出版社名", disabled=True),
                     "書名": st.column_config.TextColumn("書名", disabled=True),
                     "判型": st.column_config.TextColumn("判型", disabled=True, help="判型 (field-23)"),
                     "ISBN": st.column_config.TextColumn("ISBN", disabled=True, help="ISBN番号 (field-93)"),
                     "製本数": st.column_config.TextColumn("製本数", disabled=True),
                     "単価": st.column_config.TextColumn("単価", disabled=True),
+                    "印刷所": st.column_config.TextColumn("印刷所", disabled=True, help="印刷所 (field-14)"),
+                    "折": st.column_config.TextColumn("折", disabled=True, help="折 (field-16)"),
                     "折本日": st.column_config.DateColumn("折本日", format="YYYY-MM-DD"),
                     "無線日": st.column_config.DateColumn("無線日", format="YYYY-MM-DD"),
                     "三方日": st.column_config.DateColumn("三方日", format="YYYY-MM-DD"),
                     "仕上日": st.column_config.DateColumn("仕上日", format="YYYY-MM-DD"),
                     "見本納入日": st.column_config.DateColumn("見本納入日", format="YYYY-MM-DD", help="見本納入日（field-90_1）"),
                     "入品日": st.column_config.DateColumn("入品日", format="YYYY-MM-DD", help="入品日（field-90_10）"),
-                    "備考": st.column_config.TextColumn("備考"),
+                    "備考": st.column_config.TextColumn("備考", help="備考 (field-45)"),
                     "納品日": st.column_config.DateColumn("納品日", format="YYYY-MM-DD", help="納品日（field-88_2）"),
                     "納品数": st.column_config.TextColumn("納品数", help="納品数（field-88_4）"),
                     "PL数": st.column_config.TextColumn("PL数", help="PL数（field-88_7）"),
@@ -831,7 +861,7 @@ with tab1:
             with col_dl2:
                 pdf_bytes_ord = generate_order_pdf(edited_flat_df)
                 st.download_button(
-                    label="🖨️ 受注一覧表を PDF でダウンロード",
+                    label="🖨️ 受注一覧表を A3 PDF でダウンロード",
                     data=pdf_bytes_ord,
                     file_name=f"受注一覧表_{date.today().strftime('%Y%m%d')}.pdf",
                     mime="application/pdf",
@@ -893,7 +923,7 @@ with tab_accessory:
                 acc_flat_data.append({
                     "更新": False,
                     "_record_idx": record_idx,
-                    "_sub_idx": i,  # ★ サブテーブル上の行インデックスを保持
+                    "_sub_idx": i,
                     "詳細": detail_url,
                     "受注番号": h_ord_no,
                     "受注日": h_ord_date,
@@ -969,7 +999,7 @@ with tab_accessory:
         st.warning("⚠️ 表示対象の受注データがありません。タブ1で検索を行ってください。")
 
 # ==========================================
-# 共通の上書き保存処理（_sub_idx 完全対応版）
+# 共通の上書き保存処理
 # ==========================================
 st.divider()
 
@@ -1012,7 +1042,6 @@ if top_save_clicked or bottom_save_clicked:
             
             update_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records/{record_id}"
             
-            # 親レコードのペイロード（field-102, field-103 を含む）
             record_payload = {
                 "field-2": clean_val(original_rec.get("field-2", "")),
                 "field-1": clean_val(original_rec.get("field-1", "")),
@@ -1028,7 +1057,7 @@ if top_save_clicked or bottom_save_clicked:
                 record_payload["field-102"] = clean_val(original_rec.get("field-102", ""))
                 record_payload["field-103"] = clean_val(original_rec.get("field-103", ""))
             
-            # --- 1. field-90 (工程日等) の更新 (_sub_idx 対応) ---
+            # --- 1. field-90 (工程日等) の更新 ---
             orig_sub_90 = original_rec.get("field-90", [])
             sub90_list = copy.deepcopy(orig_sub_90)
             if source_tab == "flat":
@@ -1059,7 +1088,7 @@ if top_save_clicked or bottom_save_clicked:
             else:
                 record_payload["field-90"] = orig_sub_90
 
-            # --- 2. field-88 (納品データ) の更新 (_sub_idx 対応) ---
+            # --- 2. field-88 (納品データ) の更新 ---
             orig_sub_88 = original_rec.get("field-88", [])
             sub88_list = copy.deepcopy(orig_sub_88)
             if source_tab == "flat":
@@ -1091,7 +1120,7 @@ if top_save_clicked or bottom_save_clicked:
             else:
                 record_payload["field-88"] = orig_sub_88
 
-            # --- 3. field-89 (請求データ) の更新 (_sub_idx 対応) ---
+            # --- 3. field-89 (請求データ) の更新 ---
             orig_sub_89 = original_rec.get("field-89", [])
             sub89_list = copy.deepcopy(orig_sub_89)
             if source_tab == "flat":
@@ -1132,7 +1161,7 @@ if top_save_clicked or bottom_save_clicked:
                     cleaned_sub89.append(item_cp)
                 record_payload["field-89"] = cleaned_sub89
 
-            # --- 4. field-91 (付物データ) の更新 (_sub_idx 対応) ---
+            # --- 4. field-91 (付物データ) の更新 ---
             orig_sub_91 = original_rec.get("field-91", [])
             sub91_list = copy.deepcopy(orig_sub_91)
             if source_tab == "acc":
