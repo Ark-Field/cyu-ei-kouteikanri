@@ -241,7 +241,7 @@ def generate_order_pdf(df, group_type="publisher"):
     buffer.seek(0)
     return buffer
 
-# --- 付物明細一覧表のPDF生成（修正済み） ---
+# --- 付物明細一覧表のPDF生成 ---
 def generate_accessory_pdf(df, group_type="publisher"):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
@@ -765,7 +765,7 @@ with tab1:
                 df_temp = pd.DataFrame(flat_data)
                 
                 screen_columns = [
-                    "更新", "詳細", "受注番号", "受注日", "納期", "納期上/中/下", "急ぎ",
+                    "更新", "_record_idx", "_sub_idx", "詳細", "受注番号", "受注日", "納期", "納期上/中/下", "急ぎ",
                     "出版社名", "書名", "ISBN", "判型", "総頁数", "製本数", "製品預かり", "32P", "16P", "8P", "4P", "2P", "単価",
                     "印刷所", "折", "折本日", "無線日", "三方日", "仕上日", "見本納入日", "入品日", "備考",
                     "納品日", "納品数", "PL数", "見本数量", "在庫出荷", "配車区分", "納品", "売上日", "請求数量", "請求単価", "内見本数量", "備考_請求", "請求"
@@ -915,17 +915,18 @@ with tab1:
                 )
 
             selected_rows = edited_flat_df[edited_flat_df["更新"] == True]
-            if selected_rows.empty:
-                selected_rows = edited_flat_df.iloc[[0]]
-            
-            target_record_idx = int(selected_rows.iloc[0]["_record_idx"])
-            sample_rec = api_records[target_record_idx]
-            field_2 = clean_val(selected_rows.iloc[0]["受注番号"])
-            field_1 = clean_val(selected_rows.iloc[0]["受注日"])
-            field_8 = clean_val(selected_rows.iloc[0]["出版社名"])
-            field_13 = clean_val(selected_rows.iloc[0]["書名"])
-            field_4 = clean_val(selected_rows.iloc[0]["製本数"])
-            field_5 = clean_val(selected_rows.iloc[0]["単価"])
+            if not selected_rows.empty and "_record_idx" in selected_rows.columns:
+                target_record_idx = int(selected_rows.iloc[0]["_record_idx"])
+                sample_rec = api_records[target_record_idx] if target_record_idx < len(api_records) else {}
+                field_2 = clean_val(selected_rows.iloc[0].get("受注番号", ""))
+                field_1 = clean_val(selected_rows.iloc[0].get("受注日", ""))
+                field_8 = clean_val(selected_rows.iloc[0].get("出版社名", ""))
+                field_13 = clean_val(selected_rows.iloc[0].get("書名", ""))
+                field_4 = clean_val(selected_rows.iloc[0].get("製本数", ""))
+                field_5 = clean_val(selected_rows.iloc[0].get("単価", ""))
+            else:
+                sample_rec = api_records[0] if api_records else {}
+                field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
             
             st.info(f"📌 現在選択中のレコード: **受注番号 {field_2} ({field_13})** （納品書・請求書発行に連動しています）")
                 
