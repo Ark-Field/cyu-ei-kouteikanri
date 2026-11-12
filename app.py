@@ -158,7 +158,7 @@ def to_excel_bytes(df):
     output.seek(0)
     return output
 
-# --- 受注一覧表のPDF生成（グループ軸・書名直後のISBN/判型/総頁数に対応） ---
+# --- 受注一覧表のPDF生成（field-45の備考を含む） ---
 def generate_order_pdf(df, group_type="publisher"):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A3), leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
@@ -684,6 +684,7 @@ with tab1:
                     h_isbn = clean_val(r.get("field-93", ""))
                     h_qty = clean_val(r.get("field-4", ""))
                     h_price = clean_val(r.get("field-5", ""))
+                    h_memo = clean_val(r.get("field-45", ""))          # 備考 (field-45)
                     
                     rec_id = clean_val(r.get("_recordId", ""))
                     detail_url = f"{POCKET_BASE_URL}/apps/{APP_ID}/records/{rec_id}/detail" if rec_id and rec_id.lower() != "none" else ""
@@ -746,7 +747,7 @@ with tab1:
                             "仕上日": parse_date_safe(rec_90.get("field-90_6")),
                             "見本納入日": parse_date_safe(rec_90.get("field-90_1")),
                             "入品日": parse_date_safe(rec_90.get("field-90_10")),
-                            "備考": clean_val(rec_90.get("field-90_9", "")),
+                            "備考": h_memo,
                             "納品日": parse_date_safe(rec_88.get("field-88_2")),
                             "納品数": clean_val(rec_88.get("field-88_4", "")),
                             "PL数": clean_val(rec_88.get("field-88_7", "")),
@@ -1112,9 +1113,11 @@ if top_save_clicked or bottom_save_clicked:
                 first_row = group_df.iloc[0]
                 record_payload["field-102"] = clean_val(first_row.get("納期上/中/下", ""))
                 record_payload["field-103"] = clean_val(first_row.get("急ぎ", ""))
+                record_payload["field-45"] = clean_val(first_row.get("備考", ""))  # 備考(field-45)の保存対応
             else:
                 record_payload["field-102"] = clean_val(original_rec.get("field-102", ""))
                 record_payload["field-103"] = clean_val(original_rec.get("field-103", ""))
+                record_payload["field-45"] = clean_val(original_rec.get("field-45", ""))
             
             # --- 1. field-90 (工程日等) の更新 ---
             orig_sub_90 = original_rec.get("field-90", [])
@@ -1140,7 +1143,6 @@ if top_save_clicked or bottom_save_clicked:
                     rec_dict["field-90_6"] = date_to_str(row["仕上日"])
                     rec_dict["field-90_1"] = date_to_str(row["見本納入日"])
                     rec_dict["field-90_10"] = date_to_str(row["入品日"])
-                    rec_dict["field-90_9"] = clean_val(row["備考"])
                     sub90_list[s_idx]["record"] = rec_dict
                     
                 record_payload["field-90"] = sub90_list
