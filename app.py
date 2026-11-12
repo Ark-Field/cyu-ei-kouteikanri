@@ -173,7 +173,6 @@ def generate_order_pdf(df):
     exclude_cols = ["更新", "_record_idx", "_sub_idx", "詳細", "単価", "納品日", "PL数", "見本数量", "在庫出荷", "配車区分", "納品", "売上日", "請求数量", "請求単価", "内見本数量", "請求", "出版社名"]
     target_cols = [c for c in df.columns if c not in exclude_cols]
 
-    # 出版社（顧客）ごとにグループ化してページ分け
     publishers = df["出版社名"].unique() if "出版社名" in df.columns else [""]
     for idx, pub in enumerate(publishers):
         if idx > 0:
@@ -192,17 +191,17 @@ def generate_order_pdf(df):
         col_widths = []
         for c in target_cols:
             if c in ["受注日", "納期", "折本日", "無線日", "三方日", "仕上日", "見本納入日", "入品日"]:
-                col_widths.append(58)
+                col_widths.append(55)
             elif c == "書名":
-                col_widths.append(125)
-            elif c == "判型":
-                col_widths.append(48)
-            elif c == "ISBN":
-                col_widths.append(52)
-            elif c == "受注番号":
-                col_widths.append(52)
-            else:
+                col_widths.append(115)
+            elif c == "判型" or c == "納期上/中/下" or c == "急ぎ":
                 col_widths.append(42)
+            elif c == "ISBN":
+                col_widths.append(48)
+            elif c == "受注番号":
+                col_widths.append(50)
+            else:
+                col_widths.append(40)
                 
         current_total = sum(col_widths)
         if current_total != total_width and len(col_widths) > 0:
@@ -632,6 +631,16 @@ with tab1:
                     h_pub = clean_val(r.get("field-8", ""))
                     h_title = clean_val(r.get("field-13", ""))
                     h_format = clean_val(r.get("field-23", ""))  # 判型 (field-23)
+                    
+                    # 新規追加フィールドの取得
+                    val_102 = clean_val(r.get("field-102", ""))
+                    if val_102 not in ["", "確定", "上旬", "中旬", "下旬"]:
+                        val_102 = ""
+                    
+                    val_103 = clean_val(r.get("field-103", ""))
+                    if val_103 not in ["", "急"]:
+                        val_103 = ""
+
                     h_isbn = clean_val(r.get("field-93", ""))
                     h_qty = clean_val(r.get("field-4", ""))
                     h_price = clean_val(r.get("field-5", ""))
@@ -671,6 +680,8 @@ with tab1:
                             "受注番号": h_ord_no,
                             "受注日": h_ord_date,
                             "納期": h_due,
+                            "納期上/中/下": val_102,
+                            "急ぎ": val_103,
                             "出版社名": h_pub,
                             "書名": h_title,
                             "判型": h_format,
@@ -753,6 +764,16 @@ with tab1:
                     "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
                     "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD", disabled=True),
                     "納期": st.column_config.DateColumn("納期", format="YYYY-MM-DD", disabled=True),
+                    "納期上/中/下": st.column_config.SelectboxColumn(
+                        "納期上/中/下",
+                        options=["", "確定", "上旬", "中旬", "下旬"],
+                        help="納期の上旬・中旬・下旬・確定を選択します (field-102)"
+                    ),
+                    "急ぎ": st.column_config.SelectboxColumn(
+                        "急ぎ",
+                        options=["", "急"],
+                        help="急ぎ案件の場合は「急」を選択します (field-103)"
+                    ),
                     "出版社名": st.column_config.TextColumn("出版社名", disabled=True),
                     "書名": st.column_config.TextColumn("書名", disabled=True),
                     "判型": st.column_config.TextColumn("判型", disabled=True, help="判型 (field-23)"),
@@ -986,12 +1007,22 @@ if top_save_clicked or bottom_save_clicked:
             
             update_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records/{record_id}"
             
+            # 親レコードのペイロード（field-102, field-103 を含む）
             record_payload = {
                 "field-2": clean_val(original_rec.get("field-2", "")),
                 "field-1": clean_val(original_rec.get("field-1", "")),
                 "field-4": clean_val(original_rec.get("field-4", "")),
                 "field-5": clean_val(original_rec.get("field-5", "")),
             }
+            
+            if source_tab == "flat" and not group_df.empty:
+                # 同じレコード内の最初の行から新規フィールドの値を採用
+                first_row = group_df.iloc[0]
+                record_payload["field-102"] = clean_val(first_row.get("納期上/中/下", ""))
+                record_payload["field-103"] = clean_val(first_row.get("急ぎ", ""))
+            else:
+                record_payload["field-102"] = clean_val(original_rec.get("field-102", ""))
+                record_payload["field-103"] = clean_val(original_rec.get("field-103", ""))
             
             # --- 1. field-90 (工程日等) の更新 (_sub_idx 対応) ---
             orig_sub_90 = original_rec.get("field-90", [])
