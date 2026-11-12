@@ -176,7 +176,6 @@ def generate_order_pdf(df, group_type="publisher"):
         Spacer(1, 8),
     ]
 
-    # ご指定のPDF用並び順（書名の後ろに ISBN, 判型, 総頁数）
     pdf_target_cols = [
         "受注番号", "受注日", "納期", "納期上/中/下", "急ぎ",
         "書名", "ISBN", "判型", "総頁数", "出版社名", "製本数", "製品預かり", "32P", "16P", "8P", "4P", "2P",
@@ -184,7 +183,6 @@ def generate_order_pdf(df, group_type="publisher"):
     ]
     target_cols = [c for c in pdf_target_cols if c in df.columns]
 
-    # グループ分けのキー決定
     group_col = "出版社名" if group_type == "publisher" else "判型"
     groups = df[group_col].unique() if group_col in df.columns else [""]
 
@@ -243,7 +241,7 @@ def generate_order_pdf(df, group_type="publisher"):
     buffer.seek(0)
     return buffer
 
-# --- 付物明細一覧表のPDF生成 ---
+# --- 付物明細一覧表のPDF生成（修正済み） ---
 def generate_accessory_pdf(df, group_type="publisher"):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
@@ -255,7 +253,7 @@ def generate_accessory_pdf(df, group_type="publisher"):
 
     group_label_text = "顧客グループ別" if group_type == "publisher" else "判型グループ別"
     elements = [
-        Paragraph(<b>付物明細一覧表（表・カバー・帯・カード / {group_label_text}）</b>, title_style),
+        Paragraph(f"<b>付物明細一覧表（表・カバー・帯・カード / {group_label_text}）</b>", title_style),
         Spacer(1, 6),
         Paragraph(f"<font size=8 color='#64748B'>発行日: {date.today().strftime('%Y年%m月%d日')}</font>", styles["Normal"]),
         Spacer(1, 10),
@@ -766,7 +764,6 @@ with tab1:
                 
                 df_temp = pd.DataFrame(flat_data)
                 
-                # アプリ画面の列並び順（ご指定の構成）
                 screen_columns = [
                     "更新", "詳細", "受注番号", "受注日", "納期", "納期上/中/下", "急ぎ",
                     "出版社名", "書名", "ISBN", "判型", "総頁数", "製本数", "製品預かり", "32P", "16P", "8P", "4P", "2P", "単価",
@@ -893,7 +890,6 @@ with tab1:
 
             col_dl1, col_dl2 = st.columns(2)
             with col_dl1:
-                # Excel出力用（ご指定の並び順）
                 excel_target_cols = [
                     "受注番号", "受注日", "納期", "納期上/中/下", "急ぎ",
                     "書名", "ISBN", "判型", "総頁数", "出版社名", "製本数", "製品預かり", "32P", "16P", "8P", "4P", "2P",
