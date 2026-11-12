@@ -128,8 +128,13 @@ APP_ID = 34  # @pocket対象アプリID
 def clean_val(val):
     if val is None:
         return ""
-    if pd.isna(val):
+    if isinstance(val, (list, dict)):
         return ""
+    try:
+        if pd.isna(val):
+            return ""
+    except Exception:
+        pass
     s = str(val).strip()
     if s.lower() in ["none", "nan", "nat", "null"]:
         return ""
@@ -1016,7 +1021,6 @@ if top_save_clicked or bottom_save_clicked:
             }
             
             if source_tab == "flat" and not group_df.empty:
-                # 同じレコード内の最初の行から新規フィールドの値を採用
                 first_row = group_df.iloc[0]
                 record_payload["field-102"] = clean_val(first_row.get("納期上/中/下", ""))
                 record_payload["field-103"] = clean_val(first_row.get("急ぎ", ""))
