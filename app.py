@@ -203,7 +203,12 @@ def generate_delivery_pdf(grouped_deliv_dict):
 
     elements = []
     
-    for idx, ((d_date, cust_name, deliv_no), items) in enumerate(grouped_deliv_dict.items()):
+    for idx, ((cust_name, d_date, shipping_div), items) in enumerate(grouped_deliv_dict.items()):
+        # 伝票番号生成: YYMMHHMM (グループの先頭受注番号をベースに生成)
+        mmdd = d_date.replace("-", "")[2:6] if len(d_date) >= 10 else datetime.now().strftime("%m%d")
+        base_ord = items[0]["受注番号"] if items else "000000"
+        deliv_no = (base_ord + mmdd)[-10:].zfill(10)
+
         chunk_size = 8
         item_chunks = [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
         
@@ -214,9 +219,10 @@ def generate_delivery_pdf(grouped_deliv_dict):
             elements.append(Paragraph("<b>納 品 書</b>", title_style))
             elements.append(Spacer(1, 6))
             
+            shipping_label = f" (配送振分: {shipping_div})" if shipping_div else ""
             meta_data = [
                 [
-                    Paragraph(f"<b>{cust_name if cust_name else '（得意先名未設定）'} 御中</b>", ParagraphStyle("CName", parent=h_style, fontSize=12, leading=14)),
+                    Paragraph(f"<b>{cust_name if cust_name else '（得意先名未設定）'} 御中</b>{shipping_label}", ParagraphStyle("CName", parent=h_style, fontSize=12, leading=14)),
                     Paragraph("<b>(株)中永製本所</b><br/>埼玉県さいたま市岩槻区真福寺1400<br/>TEL 048-798-7377", ParagraphStyle("SInfo", parent=h_style, alignment=2))
                 ],
                 [
@@ -416,13 +422,12 @@ if api_records:
         rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
         sub_88_id = str(item_88.get("Id") or item_88.get("recordId") or rec_88.get("Id") or "").strip()
 
-        # 預より納品 (field-88_13) のデフォルト値を空欄に変更
         val_88_13 = clean_val(rec_88.get("field-88_13", ""))
 
         flat_data.append({
             "更新": False,
             "詳細": detail_url,
-            "納期": h_due,  # ★追加
+            "納期": h_due,
             "得意先名": h_pub,
             "受注番号": h_ord_no,
             "書名": h_title,
@@ -430,7 +435,7 @@ if api_records:
             "判型": h_format,
             "刷数": h_print_count,
             "部数": clean_val(rec_88.get("field-88_4", "")),
-            "納品日": parse_date_safe(rec_88.get("field-88_2")),  # ★部数の次に移動・追加
+            "納品日": parse_date_safe(rec_88.get("field-88_2")),
             "印": h_stamp,
             "製品預かり": h_cust_keeping,
             "預より納品": val_88_13,
@@ -447,7 +452,6 @@ if api_records:
 
     df_deliv = pd.DataFrame(flat_data)
 
-    # 画面表示項目構成の順序に並び替え
     display_cols = [
         "更新", "詳細", "納期", "得意先名", "受注番号", "書名", "定価", "判型", "刷数", 
         "部数", "納品日", "印", "製品預かり", "預より納品", "パレット数", "配本日", "見本", "備考", "納品", "配送振分"
@@ -506,7 +510,7 @@ if api_records:
                         
                         sub_88_item = {
                             "record": {
-                                "field-88_2": date_to_str(row.get("納品日")),  # 納品日（field-88_2）
+                                "field-88_2": date_to_str(row.get("納品日")),
                                 "field-88_4": clean_val(row.get("部数", "")),
                                 "field-88_7": clean_val(row.get("パレット数", "")),
                                 "field-88_8": clean_val(row.get("見本", "")),
@@ -548,14 +552,13 @@ if api_records:
             for _, row in checked_deliv_rows.iterrows():
                 cust_name = clean_val(row.get("得意先名", ""))
                 d_date_str = date_to_str(row.get("納品日"))
+                shipping_div = clean_val(row.get("配送振分", ""))
                 
-                mmdd = d_date_str.replace("-", "")[2:6] if len(d_date_str) >= 10 else datetime.now().strftime("%m%d")
-                base_ord = clean_val(row.get("受注番号", "")) or "000000"
-                deliv_no = (base_ord + mmdd)[-10:].zfill(10)
+                # キーを (得意先名, 納品日, 配送振分) に設定してグループ化
+                key = (cust_name, d_date_str, shipping_div)
                 
-                key = (d_date_str, cust_name, deliv_no)
                 grouped_deliv[key].append({
-                    "受注番号": base_ord,
+                    "受注番号": clean_val(row.get("受注番号", "")) or "000000",
                     "書名": clean_val(row.get("書名", "")),
                     "定価": clean_val(row.get("定価", "")),
                     "判型": clean_val(row.get("判型", "")),
@@ -567,7 +570,8 @@ if api_records:
                     "預より納品": clean_val(row.get("預より納品", "")),
                     "パレット数": clean_val(row.get("パレット数", "0")),
                     "見本": clean_val(row.get("見本", "0")),
-                    "備考": clean_val(row.get("備考", ""))
+                    "備考": clean_val(row.get("備考", "")),
+                    "配送振分": shipping_div
                 })
 
             pdf_bytes = generate_delivery_pdf(grouped_deliv)
