@@ -635,7 +635,7 @@ if api_records:
     # ------------------------------------------
     with tab_billing:
         st.subheader("💰 請求処理・明細管理（field-89）")
-        st.info("💡 納品完了したデータの売上日・数量・販売単価（field-5から流し込み・更新可能）・備考・見本（field-89_12）を編集し、@pocketの請求明細へ保存できます。")
+        st.info("💡 納品タブの納品日が入力されているデータのみ表示されています。売上日（field-89_1）は顧客指定に合わせて手入力・変更可能です。")
 
         billing_flat_data = []
         for record_idx, r in enumerate(api_records):
@@ -645,13 +645,18 @@ if api_records:
             h_title = clean_val(r.get("field-13", "")) # メインの品名 (field-13)
             h_unit_price_default = clean_val(r.get("field-5", "")) # メインの販売単価 (field-5)
 
-            # 納品サブテーブルからの見本取得 (field-88_8)
+            # 納品サブテーブルの取得と納品日チェック
             sub_88 = r.get("field-88", [])
             item_88 = sub_88[0] if isinstance(sub_88, list) and len(sub_88) > 0 else {}
             rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
+            
+            raw_deliv_date = clean_val(rec_88.get("field-88_2", ""))
+            if not raw_deliv_date:
+                continue  # ★ 納品日が未入力のものは請求処理タブに表示しない！
+
             default_mihon = clean_val(rec_88.get("field-88_8", ""))
             default_qty = clean_val(rec_88.get("field-88_4", ""))
-            default_delivery_date = parse_date_safe(rec_88.get("field-88_2"))
+            default_delivery_date = parse_date_safe(raw_deliv_date)
 
             # 請求サブテーブル (field-89)
             sub_89 = r.get("field-89", [])
@@ -659,11 +664,11 @@ if api_records:
             rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
             sub_89_id = str(item_89.get("Id") or item_89.get("id") or rec_89.get("Id") or "").strip()
 
-            # 各フィールドの値（@pocketのデータ優先、なければメインfield-5等のデフォルト）
-            b_sales_date = parse_date_safe(rec_89.get("field-89_1")) or default_delivery_date or date.today()
+            # 売上日（field-89_1）：@pocketにすでに値があればそれ、なければ納品日を初期値として設定（手入力・変更可能）
+            b_sales_date = parse_date_safe(rec_89.get("field-89_1")) or default_delivery_date
             b_item_name = clean_val(rec_89.get("field-89_2")) or h_title
             b_qty = clean_val(rec_89.get("field-89_3")) or default_qty
-            b_unit_price = clean_val(rec_89.get("field-89_4")) or h_unit_price_default # ★メインfield-5から流し込み
+            b_unit_price = clean_val(rec_89.get("field-89_4")) or h_unit_price_default # メインfield-5から流し込み
             b_memo = clean_val(rec_89.get("field-89_7"))
             b_mihon = clean_val(rec_89.get("field-89_12")) or default_mihon
 
@@ -671,104 +676,107 @@ if api_records:
                 "更新": False,
                 "得意先名": h_pub,
                 "受注番号": h_ord_no,
-                "売上日": b_sales_date,           # field-89_1
-                "品名": b_item_name,             # field-89_2 (メインfield-13流し込み)
+                "売上日": b_sales_date,           # field-89_1 (手入力・自由変更可能)
+                "品名": b_item_name,             # field-89_2
                 "数量": b_qty,                   # field-89_3
-                "販売単価": b_unit_price,        # field-89_4 (メインfield-5流し込み・更新可能)
+                "販売単価": b_unit_price,        # field-89_4
                 "備考": b_memo,                  # field-89_7
-                "見本": b_mihon,                 # field-89_12 (明細field-88_8流し込み)
+                "見本": b_mihon,                 # field-89_12
                 "_recordId": rec_id,
                 "_sub_89_id": sub_89_id
             })
 
-        df_billing = pd.DataFrame(billing_flat_data)
-        billing_display_cols = ["更新", "得意先名", "受注番号", "売上日", "品名", "数量", "販売単価", "備考", "見本"]
-        df_billing_display = df_billing[[c for c in billing_display_cols if c in df_billing.columns]]
+        if billing_flat_data:
+            df_billing = pd.DataFrame(billing_flat_data)
+            billing_display_cols = ["更新", "得意先名", "受注番号", "売上日", "品名", "数量", "販売単価", "備考", "見本"]
+            df_billing_display = df_billing[[c for c in billing_display_cols if c in df_billing.columns]]
 
-        edited_billing_df = st.data_editor(
-            df_billing_display,
-            num_rows="fixed",
-            key="grid_billing_sys",
-            use_container_width=True,
-            column_config={
-                "更新": st.column_config.CheckboxColumn("更新", required=True, help="チェックを入れた行の請求明細を@pocketに保存します"),
-                "得意先名": st.column_config.TextColumn("得意先名", disabled=True),
-                "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
-                "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD", help="売上日（field-89_1）"),
-                "品名": st.column_config.TextColumn("品名", help="品名（field-89_2）※メインfield-13から流し込み"),
-                "数量": st.column_config.TextColumn("数量", help="数量（field-89_3）"),
-                "販売単価": st.column_config.TextColumn("販売単価", help="販売単価（field-89_4）※メインfield-5から流し込み・更新可能"),
-                "備考": st.column_config.TextColumn("備考", help="備考（field-89_7）"),
-                "見本": st.column_config.TextColumn("見本", help="見本（field-89_12）※納品field-88_8から流し込み")
-            }
-        )
+            edited_billing_df = st.data_editor(
+                df_billing_display,
+                num_rows="fixed",
+                key="grid_billing_sys",
+                use_container_width=True,
+                column_config={
+                    "更新": st.column_config.CheckboxColumn("更新", required=True, help="チェックを入れた行の請求明細を@pocketに保存します"),
+                    "得意先名": st.column_config.TextColumn("得意先名", disabled=True),
+                    "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
+                    "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD", help="売上日（field-89_1）※顧客指定に合わせて手入力可能"),
+                    "品名": st.column_config.TextColumn("品名", help="品名（field-89_2）"),
+                    "数量": st.column_config.TextColumn("数量", help="数量（field-89_3）"),
+                    "販売単価": st.column_config.TextColumn("販売単価", help="販売単価（field-89_4）"),
+                    "備考": st.column_config.TextColumn("備考", help="備考（field-89_7）"),
+                    "見本": st.column_config.TextColumn("見本", help="見本（field-89_12）")
+                }
+            )
 
-        st.markdown("---")
-        if st.button("💾 変更した請求明細を @pocket に保存", type="primary", key="save_billing_btn"):
-            update_b_rows = edited_billing_df[edited_billing_df["更新"] == True]
-            if len(update_b_rows) == 0:
-                st.warning("⚠️ 「更新」にチェックが入っている行がありません。")
-            else:
-                b_success_count = 0
-                b_error_messages = []
-                with st.spinner("@pocketへ請求明細を保存中..."):
-                    for _, row in update_b_rows.iterrows():
-                        r_id = clean_val(row.get("_recordId", ""))
-                        ord_no = clean_val(row.get("受注番号", ""))
-                        sub_89_id = clean_val(row.get("_sub_89_id", ""))
-                        
-                        if not r_id and ord_no:
-                            search_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
-                            search_headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
-                            search_params = {"query": f'field-2 = "{ord_no}"'}
-                            try:
-                                s_res = requests.get(search_url, headers=search_headers, params=search_params, timeout=10)
-                                if s_res.status_code == 200:
-                                    s_data = s_res.json()
-                                    s_items = s_data.get("records", s_data.get("Data", s_data.get("Records", [])))
-                                    if s_items and isinstance(s_items, list):
-                                        first_item = s_items[0]
-                                        rec_body_sub = first_item.get("record", {})
-                                        r_id = str(first_item.get("Id") or first_item.get("id") or rec_body_sub.get("Id") or "").strip()
-                            except Exception:
-                                pass
+            st.markdown("---")
+            if st.button("💾 変更した請求明細を @pocket に保存", type="primary", key="save_billing_btn"):
+                update_b_rows = edited_billing_df[edited_billing_df["更新"] == True]
+                if len(update_b_rows) == 0:
+                    st.warning("⚠️ 「更新」にチェックが入っている行がありません。")
+                else:
+                    b_success_count = 0
+                    b_error_messages = []
+                    with st.spinner("@pocketへ請求明細を保存中..."):
+                        for _, row in update_b_rows.iterrows():
+                            r_id = clean_val(row.get("_recordId", ""))
+                            ord_no = clean_val(row.get("受注番号", ""))
+                            sub_89_id = clean_val(row.get("_sub_89_id", ""))
+                            
+                            if not r_id and ord_no:
+                                search_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
+                                search_headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
+                                search_params = {"query": f'field-2 = "{ord_no}"'}
+                                try:
+                                    s_res = requests.get(search_url, headers=search_headers, params=search_params, timeout=10)
+                                    if s_res.status_code == 200:
+                                        s_data = s_res.json()
+                                        s_items = s_data.get("records", s_data.get("Data", s_data.get("Records", [])))
+                                        if s_items and isinstance(s_items, list):
+                                            first_item = s_items[0]
+                                            rec_body_sub = first_item.get("record", {})
+                                            r_id = str(first_item.get("Id") or first_item.get("id") or rec_body_sub.get("Id") or "").strip()
+                                except Exception:
+                                    pass
 
-                        if not r_id:
-                            b_error_messages.append(f"受注番号 {ord_no}: レコードIDが取得できませんでした")
-                            continue
+                            if not r_id:
+                                b_error_messages.append(f"受注番号 {ord_no}: レコードIDが取得できませんでした")
+                                continue
 
-                        sub_89_item = {
-                            "record": {
-                                "field-89_1": date_to_str(row.get("売上日")),
-                                "field-89_2": clean_val(row.get("品名", "")),
-                                "field-89_3": clean_val(row.get("数量", "")),
-                                "field-89_4": clean_val(row.get("販売単価", "")), # ★ field-89_4へ保存
-                                "field-89_7": clean_val(row.get("備考", "")),
-                                "field-89_12": clean_val(row.get("見本", ""))
+                            sub_89_item = {
+                                "record": {
+                                    "field-89_1": date_to_str(row.get("売上日")),
+                                    "field-89_2": clean_val(row.get("品名", "")),
+                                    "field-89_3": clean_val(row.get("数量", "")),
+                                    "field-89_4": clean_val(row.get("販売単価", "")),
+                                    "field-89_7": clean_val(row.get("備考", "")),
+                                    "field-89_12": clean_val(row.get("見本", ""))
+                                }
                             }
-                        }
-                        if sub_89_id:
-                            sub_89_item["Id"] = sub_89_id
+                            if sub_89_id:
+                                sub_89_item["Id"] = sub_89_id
 
-                        payload = {
-                            "field-2": ord_no,
-                            "field-89": [sub_89_item]
-                        }
-                        
-                        ok, msg = update_pocket_record(r_id, payload)
-                        if ok:
-                            b_success_count += 1
-                        else:
-                            b_error_messages.append(f"受注番号 {ord_no}: {msg}")
-                
-                if b_success_count > 0:
-                    st.success(f"✨ **{b_success_count} 件** の請求明細データを @pocket へ正常に保存しました！")
-                    st.toast("✨ 請求明細の保存が完了しました！", icon="💰")
-                if b_error_messages:
-                    for err in b_error_messages:
-                        st.error(f"❌ 保存エラー: {err}")
-                if b_success_count > 0:
-                    st.rerun()
+                            payload = {
+                                "field-2": ord_no,
+                                "field-89": [sub_89_item]
+                            }
+                            
+                            ok, msg = update_pocket_record(r_id, payload)
+                            if ok:
+                                b_success_count += 1
+                            else:
+                                b_error_messages.append(f"受注番号 {ord_no}: {msg}")
+                    
+                    if b_success_count > 0:
+                        st.success(f"✨ **{b_success_count} 件** の請求明細データを @pocket へ正常に保存しました！")
+                        st.toast("✨ 請求明細の保存が完了しました！", icon="💰")
+                    if b_error_messages:
+                        for err in b_error_messages:
+                            st.error(f"❌ 保存エラー: {err}")
+                    if b_success_count > 0:
+                        st.rerun()
+        else:
+            st.info("ℹ️ 納品日が入力されている対象データがまだありません。「納品書作成タブ」側で納品日を入力・保存してください。")
 
 else:
     st.warning("⚠️ 対象データが見つかりませんでした。上部の検索条件からデータを取得してください。")
