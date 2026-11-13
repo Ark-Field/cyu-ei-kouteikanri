@@ -122,7 +122,7 @@ else:
 APP_ID = 34  # @pocket対象アプリID
 
 # ==========================================
-# 4. 便利関数
+# 4. 便利関数 ＆ 強固なID抽出関数
 # ==========================================
 def clean_val(val):
     if val is None:
@@ -138,6 +138,28 @@ def clean_val(val):
     if s.lower() in ["none", "nan", "nat", "null"]:
         return ""
     return s
+
+def extract_record_id(item):
+    """APIレスポンスのあらゆる階層からレコードIDを確実に抽出する関数"""
+    if not isinstance(item, dict):
+        return ""
+    # 1. ルート直下
+    for k in ["Id", "id", "ID", "recordId", "record_id"]:
+        if k in item and item[k]:
+            return str(item[k]).strip()
+    # 2. record内
+    rec_body = item.get("record", {})
+    if isinstance(rec_body, dict):
+        for k in ["Id", "id", "ID", "recordId", "record_id"]:
+            if k in rec_body and rec_body[k]:
+                return str(rec_body[k]).strip()
+    # 3. その他ネストされた辞書内を総当たり
+    for top_val in item.values():
+        if isinstance(top_val, dict):
+            for k in ["Id", "id", "ID", "recordId", "record_id"]:
+                if k in top_val and top_val[k]:
+                    return str(top_val[k]).strip()
+    return ""
 
 def parse_date_safe(val):
     s = clean_val(val)
@@ -336,17 +358,8 @@ def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, t
                     rec_body = {}
                 
                 merged_body = {**item, **rec_body}
-                rec_id = (
-                    item.get("Id") or 
-                    item.get("id") or 
-                    item.get("ID") or 
-                    item.get("recordId") or 
-                    rec_body.get("Id") or 
-                    rec_body.get("id") or 
-                    rec_body.get("recordId") or 
-                    ""
-                )
-                merged_body["_recordId"] = str(rec_id).strip()
+                # 強固なID抽出関数を使用
+                merged_body["_recordId"] = extract_record_id(item)
                 parsed_records.append(merged_body)
             
             if start_date and end_date:
@@ -438,7 +451,9 @@ if api_records:
             sub_88 = r.get("field-88", [])
             item_88 = sub_88[0] if isinstance(sub_88, list) and len(sub_88) > 0 else {}
             rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
-            sub_88_id = str(item_88.get("Id") or item_88.get("id") or item_88.get("recordId") or rec_88.get("Id") or "").strip()
+            
+            # 明細サブテーブルのID抽出も強固に
+            sub_88_id = extract_record_id(item_88)
 
             val_88_13 = clean_val(rec_88.get("field-88_13", ""))
 
@@ -523,6 +538,7 @@ if api_records:
                             ord_no = clean_val(row.get("受注番号", ""))
                             sub_88_id = clean_val(row.get("_sub_88_id", ""))
                             
+                            # 万が一IDが空の場合、受注番号で再検索して確実にIDを取得（フォールバック）
                             if not r_id and ord_no:
                                 search_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
                                 search_headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
@@ -533,9 +549,7 @@ if api_records:
                                         s_data = s_res.json()
                                         s_items = s_data.get("records", s_data.get("Data", s_data.get("Records", [])))
                                         if s_items and isinstance(s_items, list):
-                                            first_item = s_items[0]
-                                            rec_body_sub = first_item.get("record", {})
-                                            r_id = str(first_item.get("Id") or first_item.get("id") or rec_body_sub.get("Id") or "").strip()
+                                            r_id = extract_record_id(s_items[0])
                                 except Exception:
                                     pass
 
@@ -642,33 +656,30 @@ if api_records:
             rec_id = r.get("_recordId", "")
             h_ord_no = clean_val(r.get("field-2", ""))
             h_pub = clean_val(r.get("field-8", ""))
-            h_title = clean_val(r.get("field-13", "")) # メインの品名 (field-13)
-            h_unit_price_default = clean_val(r.get("field-5", "")) # メインの販売単価 (field-5)
+            h_title = clean_val(r.get("field-13", ""))
+            h_unit_price_default = clean_val(r.get("field-5", ""))
 
-            # 納品サブテーブルの取得と納品日チェック
             sub_88 = r.get("field-88", [])
             item_88 = sub_88[0] if isinstance(sub_88, list) and len(sub_88) > 0 else {}
             rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
             
             raw_deliv_date = clean_val(rec_88.get("field-88_2", ""))
             if not raw_deliv_date:
-                continue  # ★ 納品日が未入力のものは請求処理タブに表示しない！
+                continue
 
             default_mihon = clean_val(rec_88.get("field-88_8", ""))
             default_qty = clean_val(rec_88.get("field-88_4", ""))
             default_delivery_date = parse_date_safe(raw_deliv_date)
 
-            # 請求サブテーブル (field-89)
             sub_89 = r.get("field-89", [])
             item_89 = sub_89[0] if isinstance(sub_89, list) and len(sub_89) > 0 else {}
             rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
-            sub_89_id = str(item_89.get("Id") or item_89.get("id") or rec_89.get("Id") or "").strip()
+            sub_89_id = extract_record_id(item_89)
 
-            # 売上日（field-89_1）：@pocketにすでに値があればそれ、なければ納品日を初期値として設定（手入力・変更可能）
             b_sales_date = parse_date_safe(rec_89.get("field-89_1")) or default_delivery_date
             b_item_name = clean_val(rec_89.get("field-89_2")) or h_title
             b_qty = clean_val(rec_89.get("field-89_3")) or default_qty
-            b_unit_price = clean_val(rec_89.get("field-89_4")) or h_unit_price_default # メインfield-5から流し込み
+            b_unit_price = clean_val(rec_89.get("field-89_4")) or h_unit_price_default
             b_memo = clean_val(rec_89.get("field-89_7"))
             b_mihon = clean_val(rec_89.get("field-89_12")) or default_mihon
 
@@ -676,12 +687,12 @@ if api_records:
                 "更新": False,
                 "得意先名": h_pub,
                 "受注番号": h_ord_no,
-                "売上日": b_sales_date,           # field-89_1 (手入力・自由変更可能)
-                "品名": b_item_name,             # field-89_2
-                "数量": b_qty,                   # field-89_3
-                "販売単価": b_unit_price,        # field-89_4
-                "備考": b_memo,                  # field-89_7
-                "見本": b_mihon,                 # field-89_12
+                "売上日": b_sales_date,
+                "品名": b_item_name,
+                "数量": b_qty,
+                "販売単価": b_unit_price,
+                "備考": b_memo,
+                "見本": b_mihon,
                 "_recordId": rec_id,
                 "_sub_89_id": sub_89_id
             })
@@ -733,9 +744,7 @@ if api_records:
                                         s_data = s_res.json()
                                         s_items = s_data.get("records", s_data.get("Data", s_data.get("Records", [])))
                                         if s_items and isinstance(s_items, list):
-                                            first_item = s_items[0]
-                                            rec_body_sub = first_item.get("record", {})
-                                            r_id = str(first_item.get("Id") or first_item.get("id") or rec_body_sub.get("Id") or "").strip()
+                                            r_id = extract_record_id(s_items[0])
                                 except Exception:
                                     pass
 
