@@ -653,10 +653,11 @@ if api_records:
                     success_count = 0
                     error_messages = []
                     with st.spinner("@pocketへデータを保存中..."):
+                        # ★同一親レコードごとの変更をグループ化して一括送信
+                        grouped_deliv_updates = {}
                         for _, row in update_rows.iterrows():
                             r_id = clean_val(row.get("_recordId", ""))
                             ord_no = clean_val(row.get("受注番号", ""))
-                            sub_88_id = clean_val(row.get("_sub_88_id", ""))
                             record_idx = row.get("_record_idx")
                             
                             if not r_id and ord_no:
@@ -677,42 +678,56 @@ if api_records:
                                 error_messages.append(f"受注番号 {ord_no}: レコードIDが取得できませんでした")
                                 continue
 
-                            # ★既存の全明細行を取得し、該当する明細行IDのデータを更新して全配列をPUT
+                            if r_id not in grouped_deliv_updates:
+                                grouped_deliv_updates[r_id] = {
+                                    "ord_no": ord_no,
+                                    "record_idx": record_idx,
+                                    "rows": []
+                                }
+                            grouped_deliv_updates[r_id]["rows"].append(row)
+
+                        for r_id, g_info in grouped_deliv_updates.items():
+                            ord_no = g_info["ord_no"]
+                            record_idx = g_info["record_idx"]
+
                             original_rec = api_records[record_idx] if record_idx is not None and record_idx < len(api_records) else {}
                             existing_sub_88 = original_rec.get("field-88", [])
                             if not isinstance(existing_sub_88, list):
                                 existing_sub_88 = []
 
-                            target_found = False
                             new_sub_88_list = []
-                            edited_item_data = {
-                                "field-88_2": date_to_str(row.get("納品日")),
-                                "field-88_4": clean_val(row.get("部数", "")),
-                                "field-88_7": clean_val(row.get("パレット数", "")),
-                                "field-88_8": clean_val(row.get("見本", "")),
-                                "field-88_5": clean_val(row.get("備考", "")),
-                                "field-88_13": clean_val(row.get("預より納品", "")),
-                                "field-88_10": clean_val(row.get("配送振分", ""))
-                            }
-
                             for sub_item in existing_sub_88:
-                                if not isinstance(sub_item, dict):
-                                    continue
-                                s_id = extract_record_id(sub_item)
-                                sub_copy = json.loads(json.dumps(sub_item))
-                                if sub_88_id and s_id == sub_88_id:
-                                    if "record" in sub_copy:
-                                        sub_copy["record"].update(edited_item_data)
-                                    else:
-                                        sub_copy = {"record": edited_item_data, "Id": s_id}
-                                    target_found = True
-                                new_sub_88_list.append(sub_copy)
+                                if isinstance(sub_item, dict):
+                                    new_sub_88_list.append(json.loads(json.dumps(sub_item)))
 
-                            if not target_found:
-                                new_item = {"record": edited_item_data}
-                                if sub_88_id:
-                                    new_item["Id"] = sub_88_id
-                                new_sub_88_list.append(new_item)
+                            for row in g_info["rows"]:
+                                sub_88_id = clean_val(row.get("_sub_88_id", ""))
+                                edited_item_data = {
+                                    "field-88_2": date_to_str(row.get("納品日")),
+                                    "field-88_4": clean_val(row.get("部数", "")),
+                                    "field-88_7": clean_val(row.get("パレット数", "")),
+                                    "field-88_8": clean_val(row.get("見本", "")),
+                                    "field-88_5": clean_val(row.get("備考", "")),
+                                    "field-88_13": clean_val(row.get("預より納品", "")),
+                                    "field-88_10": clean_val(row.get("配送振分", ""))
+                                }
+
+                                target_found = False
+                                for sub_copy in new_sub_88_list:
+                                    s_id = extract_record_id(sub_copy)
+                                    if sub_88_id and s_id == sub_88_id:
+                                        if "record" in sub_copy:
+                                            sub_copy["record"].update(edited_item_data)
+                                        else:
+                                            sub_copy["record"] = edited_item_data
+                                        target_found = True
+                                        break
+
+                                if not target_found:
+                                    new_item = {"record": edited_item_data}
+                                    if sub_88_id:
+                                        new_item["Id"] = sub_88_id
+                                    new_sub_88_list.append(new_item)
 
                             payload = {
                                 "field-2": ord_no,
@@ -883,7 +898,7 @@ if api_records:
                     "金額": b_amount,
                     "備考": b_memo,
                     "見本": b_mihon,
-                    "_record_idx": record_idx,
+                    "_record_idx": record_idx,  # ★ ここに正しくインデックスを保持
                     "_recordId": rec_id,
                     "_sub_89_id": sub_89_id
                 })
@@ -926,10 +941,11 @@ if api_records:
                         b_success_count = 0
                         b_error_messages = []
                         with st.spinner("@pocketへ請求明細を保存中..."):
+                            # ★同一親レコードごとの変更をグループ化して一括送信（1行目が消える現象を完全に防止）
+                            grouped_billing_updates = {}
                             for _, row in update_b_rows.iterrows():
                                 r_id = clean_val(row.get("_recordId", ""))
                                 ord_no = clean_val(row.get("受注番号", ""))
-                                sub_89_id = clean_val(row.get("_sub_89_id", ""))
                                 record_idx = row.get("_record_idx")
                                 
                                 if not r_id and ord_no:
@@ -950,55 +966,69 @@ if api_records:
                                     b_error_messages.append(f"受注番号 {ord_no}: レコードIDが取得できませんでした")
                                     continue
 
-                                q_str = clean_val(row.get("数量", ""))
-                                p_str = clean_val(row.get("販売単価", ""))
-                                try:
-                                    q_val = float(str(q_str).replace(",", "")) if q_str else 0
-                                except:
-                                    q_val = 0
-                                try:
-                                    p_val = float(str(p_str).replace(",", "")) if p_str else 0
-                                except:
-                                    p_val = 0
-                                calc_amt = str(int(q_val * p_val))
+                                if r_id not in grouped_billing_updates:
+                                    grouped_billing_updates[r_id] = {
+                                        "ord_no": ord_no,
+                                        "record_idx": record_idx,
+                                        "rows": []
+                                    }
+                                grouped_billing_updates[r_id]["rows"].append(row)
 
-                                # ★既存の全請求明細行を取得し、該当する明細行IDのデータを更新して全配列をPUT
+                            for r_id, g_info in grouped_billing_updates.items():
+                                ord_no = g_info["ord_no"]
+                                record_idx = g_info["record_idx"]
+
                                 original_rec = api_records[record_idx] if record_idx is not None and record_idx < len(api_records) else {}
                                 existing_sub_89 = original_rec.get("field-89", [])
                                 if not isinstance(existing_sub_89, list):
                                     existing_sub_89 = []
 
-                                target_found = False
                                 new_sub_89_list = []
-                                edited_item_data = {
-                                    "field-89_1": date_to_str(row.get("売上日")),
-                                    "field-89_2": clean_val(row.get("品名", "")),
-                                    "field-89_3": q_str,
-                                    "field-89_4": p_str,
-                                    "field-89_8": calc_amt,
-                                    "field-89_7": clean_val(row.get("備考", "")),
-                                    "field-89_12": clean_val(row.get("見本", "")),
-                                    "field-89_11": clean_val(row.get("請求区分", ""))
-                                }
-
                                 for sub_item in existing_sub_89:
-                                    if not isinstance(sub_item, dict):
-                                        continue
-                                    s_id = extract_record_id(sub_item)
-                                    sub_copy = json.loads(json.dumps(sub_item))
-                                    if sub_89_id and s_id == sub_89_id:
-                                        if "record" in sub_copy:
-                                            sub_copy["record"].update(edited_item_data)
-                                        else:
-                                            sub_copy = {"record": edited_item_data, "Id": s_id}
-                                        target_found = True
-                                    new_sub_89_list.append(sub_copy)
+                                    if isinstance(sub_item, dict):
+                                        new_sub_89_list.append(json.loads(json.dumps(sub_item)))
 
-                                if not target_found:
-                                    new_item = {"record": edited_item_data}
-                                    if sub_89_id:
-                                        new_item["Id"] = sub_89_id
-                                    new_sub_89_list.append(new_item)
+                                for row in g_info["rows"]:
+                                    sub_89_id = clean_val(row.get("_sub_89_id", ""))
+                                    q_str = clean_val(row.get("数量", ""))
+                                    p_str = clean_val(row.get("販売単価", ""))
+                                    try:
+                                        q_val = float(str(q_str).replace(",", "")) if q_str else 0
+                                    except:
+                                        q_val = 0
+                                    try:
+                                        p_val = float(str(p_str).replace(",", "")) if p_str else 0
+                                    except:
+                                        p_val = 0
+                                    calc_amt = str(int(q_val * p_val))
+
+                                    edited_item_data = {
+                                        "field-89_1": date_to_str(row.get("売上日")),
+                                        "field-89_2": clean_val(row.get("品名", "")),
+                                        "field-89_3": q_str,
+                                        "field-89_4": p_str,
+                                        "field-89_8": calc_amt,
+                                        "field-89_7": clean_val(row.get("備考", "")),
+                                        "field-89_12": clean_val(row.get("見本", "")),
+                                        "field-89_11": clean_val(row.get("請求区分", ""))
+                                    }
+
+                                    target_found = False
+                                    for sub_copy in new_sub_89_list:
+                                        s_id = extract_record_id(sub_copy)
+                                        if sub_89_id and s_id == sub_89_id:
+                                            if "record" in sub_copy:
+                                                sub_copy["record"].update(edited_item_data)
+                                            else:
+                                                sub_copy["record"] = edited_item_data
+                                            target_found = True
+                                            break
+
+                                    if not target_found:
+                                        new_item = {"record": edited_item_data}
+                                        if sub_89_id:
+                                            new_item["Id"] = sub_89_id
+                                        new_sub_89_list.append(new_item)
 
                                 payload = {
                                     "field-2": ord_no,
