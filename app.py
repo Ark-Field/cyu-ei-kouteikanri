@@ -268,7 +268,7 @@ def generate_delivery_pdf(grouped_deliv_dict):
                     Paragraph(f"<b>印:</b> {item['印']}", td_sub_style),
                     Paragraph(f"<b>製品預:</b> {item['製品預かり']}", td_sub_style),
                     Paragraph(f"<b>預納品:</b> {item['預より納品']}", td_sub_style),
-                    Paragraph(f"<b>配本:</b> {item['配本日']}", td_sub_style)
+                    Paragraph(f"<b>納品日:</b> {item['納品日']}", td_sub_style)
                 ])
                 
                 t_styles.append(("SPAN", (0, row_idx + 1), (3, row_idx + 1)))
@@ -402,6 +402,7 @@ if api_records:
         detail_url = f"{POCKET_BASE_URL}/apps/{APP_ID}/records/{rec_id}/detail" if rec_id and rec_id.lower() != "none" else ""
 
         h_ord_no = clean_val(r.get("field-2", ""))
+        h_due = parse_date_safe(r.get("field-52"))       # 納期 (field-52)
         h_pub = clean_val(r.get("field-8", ""))       # 得意先名 (field-8)
         h_title = clean_val(r.get("field-13", ""))
         h_price = clean_val(r.get("field-20", ""))      # 定価 (field-20)
@@ -415,21 +416,21 @@ if api_records:
         rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
         sub_88_id = str(item_88.get("Id") or item_88.get("recordId") or rec_88.get("Id") or "").strip()
 
-        # 預より納品 (field-88_13) のデフォルト値を「在庫から」に設定
+        # 預より納品 (field-88_13) のデフォルト値を空欄に変更
         val_88_13 = clean_val(rec_88.get("field-88_13", ""))
-        if not val_88_13:
-            val_88_13 = "在庫から"
 
         flat_data.append({
             "更新": False,
             "詳細": detail_url,
-            "得意先名": h_pub,  # ★追加
+            "納期": h_due,  # ★追加
+            "得意先名": h_pub,
             "受注番号": h_ord_no,
             "書名": h_title,
             "定価": h_price,
             "判型": h_format,
             "刷数": h_print_count,
             "部数": clean_val(rec_88.get("field-88_4", "")),
+            "納品日": parse_date_safe(rec_88.get("field-88_2")),  # ★部数の次に移動・追加
             "印": h_stamp,
             "製品預かり": h_cust_keeping,
             "預より納品": val_88_13,
@@ -446,10 +447,10 @@ if api_records:
 
     df_deliv = pd.DataFrame(flat_data)
 
-    # 画面表示項目構成の順序に並び替え（得意先名を追加）
+    # 画面表示項目構成の順序に並び替え
     display_cols = [
-        "更新", "詳細", "得意先名", "受注番号", "書名", "定価", "判型", "刷数", 
-        "部数", "印", "製品預かり", "預より納品", "パレット数", "配本日", "見本", "備考", "納品", "配送振分"
+        "更新", "詳細", "納期", "得意先名", "受注番号", "書名", "定価", "判型", "刷数", 
+        "部数", "納品日", "印", "製品預かり", "預より納品", "パレット数", "配本日", "見本", "備考", "納品", "配送振分"
     ]
     df_deliv_display = df_deliv[[c for c in display_cols if c in df_deliv.columns]]
 
@@ -461,6 +462,7 @@ if api_records:
         column_config={
             "更新": st.column_config.CheckboxColumn("更新", required=True, help="チェックを入れた行を@pocketに保存します"),
             "詳細": st.column_config.LinkColumn("🔗詳細", help="@pocket詳細画面を開く", display_text="📝開く"),
+            "納期": st.column_config.DateColumn("納期", format="YYYY-MM-DD", disabled=True, help="納期（field-52）"),
             "得意先名": st.column_config.TextColumn("得意先名", disabled=True, help="得意先名（field-8）"),
             "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
             "書名": st.column_config.TextColumn("書名", disabled=True),
@@ -468,6 +470,7 @@ if api_records:
             "判型": st.column_config.TextColumn("判型", disabled=True),
             "刷数": st.column_config.TextColumn("刷数", disabled=True),
             "部数": st.column_config.TextColumn("部数", help="納品数（field-88_4）"),
+            "納品日": st.column_config.DateColumn("納品日", format="YYYY-MM-DD", help="納品日（field-88_2）"),
             "印": st.column_config.TextColumn("印", disabled=True, help="印（field-4）"),
             "製品預かり": st.column_config.TextColumn("製品預かり", disabled=True, help="製品預かり（field-81）"),
             "預より納品": st.column_config.SelectboxColumn(
@@ -503,7 +506,7 @@ if api_records:
                         
                         sub_88_item = {
                             "record": {
-                                "field-88_2": date_to_str(row.get("配本日")),
+                                "field-88_2": date_to_str(row.get("納品日")),  # 納品日（field-88_2）
                                 "field-88_4": clean_val(row.get("部数", "")),
                                 "field-88_7": clean_val(row.get("パレット数", "")),
                                 "field-88_8": clean_val(row.get("見本", "")),
@@ -544,7 +547,7 @@ if api_records:
             
             for _, row in checked_deliv_rows.iterrows():
                 cust_name = clean_val(row.get("得意先名", ""))
-                d_date_str = date_to_str(row.get("配本日"))
+                d_date_str = date_to_str(row.get("納品日"))
                 
                 mmdd = d_date_str.replace("-", "")[2:6] if len(d_date_str) >= 10 else datetime.now().strftime("%m%d")
                 base_ord = clean_val(row.get("受注番号", "")) or "000000"
@@ -558,11 +561,11 @@ if api_records:
                     "判型": clean_val(row.get("判型", "")),
                     "刷数": clean_val(row.get("刷数", "")),
                     "部数": clean_val(row.get("部数", "0")),
+                    "納品日": d_date_str,
                     "印": clean_val(row.get("印", "")),
                     "製品預かり": clean_val(row.get("製品預かり", "")),
                     "預より納品": clean_val(row.get("預より納品", "")),
                     "パレット数": clean_val(row.get("パレット数", "0")),
-                    "配本日": d_date_str,
                     "見本": clean_val(row.get("見本", "0")),
                     "備考": clean_val(row.get("備考", ""))
                 })
