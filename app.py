@@ -196,6 +196,9 @@ def generate_delivery_pdf(grouped_deliv_dict):
     
     title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=16, leading=18, alignment=1, textColor=colors.HexColor("#1E3A8A"))
     h_style = ParagraphStyle("H", parent=styles["Normal"], fontName=FONT_NAME, fontSize=9, leading=12, textColor=colors.HexColor("#333333"))
+    # 自社名を大きく濃く修正したスタイル
+    company_style = ParagraphStyle("SInfo", parent=styles["Normal"], fontName=FONT_NAME, fontSize=11, leading=15, textColor=colors.HexColor("#0F172A"), alignment=2)
+    
     th_style = ParagraphStyle("TH", parent=styles["Normal"], fontName=FONT_NAME, fontSize=8, leading=10, textColor=colors.white, alignment=1)
     td_style = ParagraphStyle("TD", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7.5, leading=9.5, textColor=colors.HexColor("#1E293B"))
     td_right = ParagraphStyle("TDR", parent=td_style, alignment=2)
@@ -222,7 +225,7 @@ def generate_delivery_pdf(grouped_deliv_dict):
             meta_data = [
                 [
                     Paragraph(f"<b>{cust_name if cust_name else '（得意先名未設定）'} 御中</b>{shipping_label}", ParagraphStyle("CName", parent=h_style, fontSize=12, leading=14)),
-                    Paragraph("<b>(株)中永製本所</b><br/>埼玉県さいたま市岩槻区真福寺1400<br/>TEL 048-798-7377", ParagraphStyle("SInfo", parent=h_style, alignment=2))
+                    Paragraph("<b>(株)中永製本所</b><br/>埼玉県さいたま市岩槻区真福寺1400<br/>TEL 048-798-7377", company_style)
                 ],
                 [
                     Paragraph(f"伝票番号: {deliv_no}<br/>納品日: {d_date if d_date else '（未設定）'}", h_style),
@@ -268,15 +271,18 @@ def generate_delivery_pdf(grouped_deliv_dict):
                     Paragraph(f"{item['パレット数']} PL", td_right),
                     Paragraph(f"{item['見本']} 部", td_right)
                 ])
+                # 下段2行目：備考の手前にISBN（4字幅相当）を追加配置
                 table_data.append([
-                    Paragraph(f"<b>備考:</b> {item['備考']}", td_sub_style), "", "", "",
+                    Paragraph(f"<b>ISBN:</b> {item['ISBN']}", td_sub_style), # カラム0 (ISBN)
+                    Paragraph(f"<b>備考:</b> {item['備考']}", td_sub_style), "", "",  # カラム1〜3 (備考を結合)
                     Paragraph(f"<b>印:</b> {item['印']}", td_sub_style),
                     Paragraph(f"<b>製品預:</b> {item['製品預かり']}", td_sub_style),
                     Paragraph(f"<b>預納品:</b> {item['預より納品']}", td_sub_style),
                     Paragraph(f"<b>納品日:</b> {item['納品日']}", td_sub_style)
                 ])
                 
-                t_styles.append(("SPAN", (0, row_idx + 1), (3, row_idx + 1)))
+                # カラム1から3までを備考用に結合
+                t_styles.append(("SPAN", (1, row_idx + 1), (3, row_idx + 1)))
                 bg_color = colors.HexColor("#F8FAFC") if (row_idx // 2) % 2 == 1 else colors.white
                 t_styles.append(("BACKGROUND", (0, row_idx), (-1, row_idx + 1), bg_color))
                 
@@ -292,7 +298,7 @@ def generate_delivery_pdf(grouped_deliv_dict):
     return buffer
 
 # ==========================================
-# 5. データ取得関数（ID抽出を堅牢化）
+# 5. データ取得関数
 # ==========================================
 query_params = st.query_params
 url_order_no = query_params.get("ord", None)
@@ -333,8 +339,6 @@ def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, t
                     rec_body = {}
                 
                 merged_body = {**item, **rec_body}
-                
-                # レコードIDを確実に抽出
                 rec_id = (
                     item.get("Id") or 
                     item.get("id") or 
@@ -419,6 +423,7 @@ if api_records:
         h_ord_no = clean_val(r.get("field-2", ""))
         h_due = parse_date_safe(r.get("field-52"))
         h_pub = clean_val(r.get("field-8", ""))
+        h_isbn = clean_val(r.get("field-93", ""))     # ISBN (field-93)
         h_title = clean_val(r.get("field-13", ""))
         h_price = clean_val(r.get("field-20", ""))
         h_format = clean_val(r.get("field-23", ""))
@@ -439,6 +444,7 @@ if api_records:
             "納期": h_due,
             "得意先名": h_pub,
             "受注番号": h_ord_no,
+            "ISBN": h_isbn,                            # ★受注番号の次に追加
             "書名": h_title,
             "定価": h_price,
             "判型": h_format,
@@ -462,7 +468,7 @@ if api_records:
     df_deliv = pd.DataFrame(flat_data)
 
     display_cols = [
-        "更新", "詳細", "納期", "得意先名", "受注番号", "書名", "定価", "判型", "刷数", 
+        "更新", "詳細", "納期", "得意先名", "受注番号", "ISBN", "書名", "定価", "判型", "刷数", 
         "部数", "納品日", "印", "製品預かり", "預より納品", "パレット数", "配本日", "見本", "備考", "納品", "配送振分"
     ]
     df_deliv_display = df_deliv[[c for c in display_cols if c in df_deliv.columns]]
@@ -478,6 +484,7 @@ if api_records:
             "納期": st.column_config.DateColumn("納期", format="YYYY-MM-DD", disabled=True, help="納期（field-52）"),
             "得意先名": st.column_config.TextColumn("得意先名", disabled=True, help="得意先名（field-8）"),
             "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
+            "ISBN": st.column_config.TextColumn("ISBN", disabled=True, help="ISBN（field-93）"),
             "書名": st.column_config.TextColumn("書名", disabled=True),
             "定価": st.column_config.TextColumn("定価", disabled=True),
             "判型": st.column_config.TextColumn("判型", disabled=True),
@@ -500,7 +507,7 @@ if api_records:
         }
     )
 
-    # --- 保存 ＆ 納品書出力ボタンの処理（受注番号ベース＋フォールバック検索対応） ---
+    # --- 保存 ＆ 納品書出力ボタンの処理 ---
     st.markdown("---")
     col_save, col_pdf, col_excel = st.columns([1.5, 1.5, 1.5])
     
@@ -518,7 +525,6 @@ if api_records:
                         ord_no = clean_val(row.get("受注番号", ""))
                         sub_88_id = clean_val(row.get("_sub_88_id", ""))
                         
-                        # レコードIDがない場合、メインキー「受注番号」を使ってAPIから該当レコードのIDを逆引き取得（フォールバック）
                         if not r_id and ord_no:
                             search_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
                             search_headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
@@ -545,7 +551,6 @@ if api_records:
                             error_messages.append(f"受注番号 {ord_no}: レコードIDが取得できませんでした")
                             continue
 
-                        # 明細はレコードIDを採取してから上書き
                         sub_88_item = {
                             "record": {
                                 "field-88_2": date_to_str(row.get("納品日")),
@@ -560,7 +565,6 @@ if api_records:
                         if sub_88_id:
                             sub_88_item["Id"] = sub_88_id
 
-                        # メインキー（受注番号）を含めたペイロード
                         payload = {
                             "field-2": ord_no,
                             "field-88": [sub_88_item]
@@ -573,7 +577,8 @@ if api_records:
                             error_messages.append(f"受注番号 {ord_no}: {msg}")
                 
                 if success_count > 0:
-                    st.success(f"✨ **{success_count} 件** のデータを @pocket へ正常に保存しました！")
+                    st.success(f"✨ **{success_count} 件** のデータを @pocket へ正常に保存しました！（保存完了）")
+                    st.toast("✨ 保存が完了しました！", icon="💾")
                 if error_messages:
                     for err in error_messages:
                         st.error(f"❌ 保存エラー: {err}")
@@ -593,11 +598,11 @@ if api_records:
                 d_date_str = date_to_str(row.get("納品日"))
                 shipping_div = clean_val(row.get("配送振分", ""))
                 
-                # グループ条件：顧客名、同じ納品日、配送振分
                 key = (cust_name, d_date_str, shipping_div)
                 
                 grouped_deliv[key].append({
                     "受注番号": clean_val(row.get("受注番号", "")) or "000000",
+                    "ISBN": clean_val(row.get("ISBN", "")),
                     "書名": clean_val(row.get("書名", "")),
                     "定価": clean_val(row.get("定価", "")),
                     "判型": clean_val(row.get("判型", "")),
