@@ -140,20 +140,16 @@ def clean_val(val):
     return s
 
 def extract_record_id(item):
-    """APIレスポンスのあらゆる階層からレコードIDを確実に抽出する関数"""
     if not isinstance(item, dict):
         return ""
-    # 1. ルート直下
     for k in ["Id", "id", "ID", "recordId", "record_id"]:
         if k in item and item[k]:
             return str(item[k]).strip()
-    # 2. record内
     rec_body = item.get("record", {})
     if isinstance(rec_body, dict):
         for k in ["Id", "id", "ID", "recordId", "record_id"]:
             if k in rec_body and rec_body[k]:
                 return str(rec_body[k]).strip()
-    # 3. その他ネストされた辞書内を総当たり
     for top_val in item.values():
         if isinstance(top_val, dict):
             for k in ["Id", "id", "ID", "recordId", "record_id"]:
@@ -316,6 +312,111 @@ def generate_delivery_pdf(grouped_deliv_dict):
     buffer.seek(0)
     return buffer
 
+# --- 請求書PDF生成関数 ---
+def generate_billing_pdf(grouped_billing_dict):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=25, rightMargin=25, topMargin=25, bottomMargin=25)
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=16, leading=18, alignment=1, textColor=colors.HexColor("#1E3A8A"))
+    h_style = ParagraphStyle("H", parent=styles["Normal"], fontName=FONT_NAME, fontSize=9, leading=12, textColor=colors.HexColor("#333333"))
+    company_style = ParagraphStyle("SInfo", parent=styles["Normal"], fontName=FONT_NAME, fontSize=11, leading=15, textColor=colors.HexColor("#0F172A"), alignment=2)
+    
+    th_style = ParagraphStyle("TH", parent=styles["Normal"], fontName=FONT_NAME, fontSize=8, leading=10, textColor=colors.white, alignment=1)
+    td_style = ParagraphStyle("TD", parent=styles["Normal"], fontName=FONT_NAME, fontSize=8, leading=10, textColor=colors.HexColor("#1E293B"))
+    td_right = ParagraphStyle("TDR", parent=td_style, alignment=2)
+
+    elements = []
+    
+    for idx, (cust_name, items) in enumerate(grouped_billing_dict.items()):
+        if idx > 0:
+            elements.append(PageBreak())
+            
+        elements.append(Paragraph("<b>御 請 求 書</b>", title_style))
+        elements.append(Spacer(1, 6))
+        
+        meta_data = [
+            [
+                Paragraph(f"<b>{cust_name if cust_name else '（得意先名未設定）'} 御中</b>", ParagraphStyle("CName", parent=h_style, fontSize=12, leading=14)),
+                Paragraph("<b>(株)中永製本所</b><br/>埼玉県さいたま市岩槻区真福寺1400<br/>TEL 048-798-7377", company_style)
+            ],
+            [
+                Paragraph(f"請求発行日: {date.today().strftime('%Y年%m月%d日')}", h_style),
+                Paragraph("", h_style)
+            ]
+        ]
+        meta_table = Table(meta_data, colWidths=[400, 392])
+        meta_table.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP"), ("BOTTOMPADDING", (0,0), (-1,-1), 2)]))
+        elements.append(meta_table)
+        elements.append(Spacer(1, 4))
+        
+        elements.append(Paragraph("平素は格別のお引き立てを賜り、厚く御礼申し上げます。下記のとおりご請求申し上げます。", h_style))
+        elements.append(Spacer(1, 6))
+        
+        table_data = [[
+            Paragraph("売上日", th_style),
+            Paragraph("受注番号", th_style),
+            Paragraph("品名", th_style),
+            Paragraph("数量", th_style),
+            Paragraph("販売単価", th_style),
+            Paragraph("金額（小計）", th_style),
+            Paragraph("備考", th_style),
+            Paragraph("見本", th_style)
+        ]]
+        
+        t_styles = [
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
+        ]
+        
+        total_amount = 0
+        for r_idx, item in enumerate(items):
+            try:
+                qty = float(str(item["数量"]).replace(",", "")) if item["数量"] else 0
+            except:
+                qty = 0
+            try:
+                price = float(str(item["販売単価"]).replace(",", "")) if item["販売単価"] else 0
+            except:
+                price = 0
+            
+            subtotal = qty * price
+            total_amount += subtotal
+
+            table_data.append([
+                Paragraph(item['売上日'], td_style),
+                Paragraph(item['受注番号'], td_style),
+                Paragraph(item['品名'], td_style),
+                Paragraph(f"{item['数量']} 部", td_right),
+                Paragraph(f"¥{price:,.0f}" if price else "", td_right),
+                Paragraph(f"¥{subtotal:,.0f}" if subtotal else "", td_right),
+                Paragraph(item['備考'], td_style),
+                Paragraph(f"{item['見本']} 部" if item['見本'] else "", td_right)
+            ])
+            bg_color = colors.HexColor("#F8FAFC") if r_idx % 2 == 1 else colors.white
+            t_styles.append(("BACKGROUND", (0, r_idx + 1), (-1, r_idx + 1), bg_color))
+
+        # 合計行の追加
+        table_data.append([
+            Paragraph("<b>合計金額（税込）</b>", td_style), "", "", "", "",
+            Paragraph(f"<b>¥{total_amount:,.0f}</b>", td_right), "", ""
+        ])
+        tot_row_idx = len(items) + 1
+        t_styles.append(("SPAN", (0, tot_row_idx), (4, tot_row_idx)))
+        t_styles.append(("BACKGROUND", (0, tot_row_idx), (-1, tot_row_idx), colors.HexColor("#E2E8F0")))
+
+        col_widths = [70, 70, 242, 50, 70, 80, 100, 50]
+        b_table = Table(table_data, colWidths=col_widths)
+        b_table.setStyle(TableStyle(t_styles))
+        elements.append(b_table)
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
 # ==========================================
 # 5. データ取得関数
 # ==========================================
@@ -358,7 +459,6 @@ def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, t
                     rec_body = {}
                 
                 merged_body = {**item, **rec_body}
-                # 強固なID抽出関数を使用
                 merged_body["_recordId"] = extract_record_id(item)
                 parsed_records.append(merged_body)
             
@@ -451,8 +551,6 @@ if api_records:
             sub_88 = r.get("field-88", [])
             item_88 = sub_88[0] if isinstance(sub_88, list) and len(sub_88) > 0 else {}
             rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
-            
-            # 明細サブテーブルのID抽出も強固に
             sub_88_id = extract_record_id(item_88)
 
             val_88_13 = clean_val(rec_88.get("field-88_13", ""))
@@ -538,7 +636,6 @@ if api_records:
                             ord_no = clean_val(row.get("受注番号", ""))
                             sub_88_id = clean_val(row.get("_sub_88_id", ""))
                             
-                            # 万が一IDが空の場合、受注番号で再検索して確実にIDを取得（フォールバック）
                             if not r_id and ord_no:
                                 search_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
                                 search_headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
@@ -585,11 +682,11 @@ if api_records:
                     if success_count > 0:
                         st.success(f"✨ **{success_count} 件** のデータを @pocket へ正常に保存しました！（保存完了）")
                         st.toast("✨ 保存が完了しました！", icon="💾")
+                        st.session_state["api_records"] = fetch_pocket_records(start_date=t1_start, end_date=t1_end, target_publisher=publisher_input if publisher_input else None, date_field=target_date_field)
+                        st.rerun()
                     if error_messages:
                         for err in error_messages:
                             st.error(f"❌ 保存エラー: {err}")
-                    if success_count > 0:
-                        st.rerun()
 
         checked_deliv_rows = edited_deliv_df[edited_deliv_df["納品"] == True]
 
@@ -721,69 +818,106 @@ if api_records:
             )
 
             st.markdown("---")
-            if st.button("💾 変更した請求明細を @pocket に保存", type="primary", key="save_billing_btn"):
-                update_b_rows = edited_billing_df[edited_billing_df["更新"] == True]
-                if len(update_b_rows) == 0:
-                    st.warning("⚠️ 「更新」にチェックが入っている行がありません。")
-                else:
-                    b_success_count = 0
-                    b_error_messages = []
-                    with st.spinner("@pocketへ請求明細を保存中..."):
-                        for _, row in update_b_rows.iterrows():
-                            r_id = clean_val(row.get("_recordId", ""))
-                            ord_no = clean_val(row.get("受注番号", ""))
-                            sub_89_id = clean_val(row.get("_sub_89_id", ""))
-                            
-                            if not r_id and ord_no:
-                                search_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
-                                search_headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
-                                search_params = {"query": f'field-2 = "{ord_no}"'}
-                                try:
-                                    s_res = requests.get(search_url, headers=search_headers, params=search_params, timeout=10)
-                                    if s_res.status_code == 200:
-                                        s_data = s_res.json()
-                                        s_items = s_data.get("records", s_data.get("Data", s_data.get("Records", [])))
-                                        if s_items and isinstance(s_items, list):
-                                            r_id = extract_record_id(s_items[0])
-                                except Exception:
-                                    pass
+            b_col_save, b_col_pdf, b_col_excel = st.columns([1.5, 1.5, 1.5])
 
-                            if not r_id:
-                                b_error_messages.append(f"受注番号 {ord_no}: レコードIDが取得できませんでした")
-                                continue
+            with b_col_save:
+                if st.button("💾 変更した請求明細を @pocket に保存", type="primary", key="save_billing_btn"):
+                    update_b_rows = edited_billing_df[edited_billing_df["更新"] == True]
+                    if len(update_b_rows) == 0:
+                        st.warning("⚠️ 「更新」にチェックが入っている行がありません。")
+                    else:
+                        b_success_count = 0
+                        b_error_messages = []
+                        with st.spinner("@pocketへ請求明細を保存中..."):
+                            for _, row in update_b_rows.iterrows():
+                                r_id = clean_val(row.get("_recordId", ""))
+                                ord_no = clean_val(row.get("受注番号", ""))
+                                sub_89_id = clean_val(row.get("_sub_89_id", ""))
+                                
+                                if not r_id and ord_no:
+                                    search_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
+                                    search_headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
+                                    search_params = {"query": f'field-2 = "{ord_no}"'}
+                                    try:
+                                        s_res = requests.get(search_url, headers=search_headers, params=search_params, timeout=10)
+                                        if s_res.status_code == 200:
+                                            s_data = s_res.json()
+                                            s_items = s_data.get("records", s_data.get("Data", s_data.get("Records", [])))
+                                            if s_items and isinstance(s_items, list):
+                                                r_id = extract_record_id(s_items[0])
+                                    except Exception:
+                                        pass
 
-                            sub_89_item = {
-                                "record": {
-                                    "field-89_1": date_to_str(row.get("売上日")),
-                                    "field-89_2": clean_val(row.get("品名", "")),
-                                    "field-89_3": clean_val(row.get("数量", "")),
-                                    "field-89_4": clean_val(row.get("販売単価", "")),
-                                    "field-89_7": clean_val(row.get("備考", "")),
-                                    "field-89_12": clean_val(row.get("見本", ""))
+                                if not r_id:
+                                    b_error_messages.append(f"受注番号 {ord_no}: レコードIDが取得できませんでした")
+                                    continue
+
+                                sub_89_item = {
+                                    "record": {
+                                        "field-89_1": date_to_str(row.get("売上日")),
+                                        "field-89_2": clean_val(row.get("品名", "")),
+                                        "field-89_3": clean_val(row.get("数量", "")),
+                                        "field-89_4": clean_val(row.get("販売単価", "")),
+                                        "field-89_7": clean_val(row.get("備考", "")),
+                                        "field-89_12": clean_val(row.get("見本", ""))
+                                    }
                                 }
-                            }
-                            if sub_89_id:
-                                sub_89_item["Id"] = sub_89_id
+                                if sub_89_id:
+                                    sub_89_item["Id"] = sub_89_id
 
-                            payload = {
-                                "field-2": ord_no,
-                                "field-89": [sub_89_item]
-                            }
-                            
-                            ok, msg = update_pocket_record(r_id, payload)
-                            if ok:
-                                b_success_count += 1
-                            else:
-                                b_error_messages.append(f"受注番号 {ord_no}: {msg}")
-                    
-                    if b_success_count > 0:
-                        st.success(f"✨ **{b_success_count} 件** の請求明細データを @pocket へ正常に保存しました！")
-                        st.toast("✨ 請求明細の保存が完了しました！", icon="💰")
-                    if b_error_messages:
-                        for err in b_error_messages:
-                            st.error(f"❌ 保存エラー: {err}")
-                    if b_success_count > 0:
-                        st.rerun()
+                                payload = {
+                                    "field-2": ord_no,
+                                    "field-89": [sub_89_item]
+                                }
+                                
+                                ok, msg = update_pocket_record(r_id, payload)
+                                if ok:
+                                    b_success_count += 1
+                                else:
+                                    b_error_messages.append(f"受注番号 {ord_no}: {msg}")
+                        
+                        if b_success_count > 0:
+                            st.success(f"✨ **{b_success_count} 件** の請求明細データを @pocket へ正常に保存しました！")
+                            st.toast("✨ 請求明細の保存が完了しました！", icon="💰")
+                            st.session_state["api_records"] = fetch_pocket_records(start_date=t1_start, end_date=t1_end, target_publisher=publisher_input if publisher_input else None, date_field=target_date_field)
+                            st.rerun()
+                        if b_error_messages:
+                            for err in b_error_messages:
+                                st.error(f"❌ 保存エラー: {err}")
+
+            with b_col_pdf:
+                # 請求書PDFダウンロード（表示されている全請求データを対象）
+                from collections import defaultdict
+                grouped_billing = defaultdict(list)
+                for _, row in edited_billing_df.iterrows():
+                    cust = clean_val(row.get("得意先名", ""))
+                    grouped_billing[cust].append({
+                        "売上日": date_to_str(row.get("売上日")),
+                        "受注番号": clean_val(row.get("受注番号", "")),
+                        "品名": clean_val(row.get("品名", "")),
+                        "数量": clean_val(row.get("数量", "0")),
+                        "販売単価": clean_val(row.get("販売単価", "0")),
+                        "備考": clean_val(row.get("備考", "")),
+                        "見本": clean_val(row.get("見本", "0"))
+                    })
+
+                billing_pdf_bytes = generate_billing_pdf(grouped_billing)
+                st.download_button(
+                    label="🖨️ 請求書 PDF ダウンロード",
+                    data=billing_pdf_bytes,
+                    file_name=f"請求書_{date.today().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf"
+                )
+
+            with b_col_excel:
+                excel_billing_bytes = to_excel_bytes(edited_billing_df.drop(columns=["更新", "_recordId", "_sub_89_id"], errors="ignore"))
+                st.download_button(
+                    label="📥 請求データ Excel ダウンロード",
+                    data=excel_billing_bytes,
+                    file_name=f"請求データ_{date.today().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+
         else:
             st.info("ℹ️ 納品日が入力されている対象データがまだありません。「納品書作成タブ」側で納品日を入力・保存してください。")
 
