@@ -81,7 +81,7 @@ dark_navy_theme_css = """
 """
 st.markdown(dark_navy_theme_css, unsafe_allow_html=True)
 
-st.title("📦 納品書作成システム（@pocket連動）")
+st.title("📦 納品書作成（DB連動）")
 
 # ==========================================
 # 2. 日本語フォント登録処理（ReportLab用）
@@ -382,9 +382,9 @@ if "api_records" not in st.session_state or url_order_no:
         st.session_state["api_records"] = fetch_pocket_records(start_date=default_start, end_date=default_end, date_field="field-52")
 
 # ==========================================
-# 6. メイン画面（納品書作成システム）
+# 6. メイン画面（納品書作成）
 # ==========================================
-st.header("📦 納品書作成システム")
+st.header("📦 納品書作成")
 
 with st.expander("🔍 検索条件の設定はこちら", expanded=bool(not url_order_no)):
     search_date_type = st.radio("📅 期間検索の基準を選択", ["納期（field-52）", "受注日（field-1）"], horizontal=True)
@@ -512,14 +512,14 @@ if api_records:
     col_save, col_pdf, col_excel = st.columns([1.5, 1.5, 1.5])
     
     with col_save:
-        if st.button("💾 変更した行を @pocket に保存", type="primary", key="save_deliv_btn"):
+        if st.button("💾 変更した行を DB に保存", type="primary", key="save_deliv_btn"):
             update_rows = edited_deliv_df[edited_deliv_df["更新"] == True]
             if len(update_rows) == 0:
                 st.warning("⚠️ 「更新」にチェックが入っている行がありません。")
             else:
                 success_count = 0
                 error_messages = []
-                with st.spinner("@pocketへデータを保存中..."):
+                with st.spinner("DBへデータを保存中..."):
                     for _, row in update_rows.iterrows():
                         r_id = clean_val(row.get("_recordId", ""))
                         ord_no = clean_val(row.get("受注番号", ""))
@@ -577,7 +577,7 @@ if api_records:
                             error_messages.append(f"受注番号 {ord_no}: {msg}")
                 
                 if success_count > 0:
-                    st.success(f"✨ **{success_count} 件** のデータを @pocket へ正常に保存しました！（保存完了）")
+                    st.success(f"✨ **{success_count} 件** のデータを DB へ正常に保存しました！（保存完了）")
                     st.toast("✨ 保存が完了しました！", icon="💾")
                 if error_messages:
                     for err in error_messages:
