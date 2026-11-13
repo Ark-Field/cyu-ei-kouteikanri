@@ -312,7 +312,7 @@ def generate_delivery_pdf(grouped_deliv_dict):
     buffer.seek(0)
     return buffer
 
-# --- 請求書PDF生成関数（金額 field-89_8 の反映対応） ---
+# --- 請求書PDF生成関数 ---
 def generate_billing_pdf(grouped_billing_dict, bank_info, billing_memo):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=25, rightMargin=25, topMargin=25, bottomMargin=25)
@@ -547,7 +547,7 @@ if api_records:
     tab_delivery, tab_billing = st.tabs(["📦 納品書作成タブ", "💰 請求処理タブ"])
 
     # ------------------------------------------
-    # Tab 1: 納品書作成
+    # Tab 1: 納品書作成（サブテーブル全行展開対応）
     # ------------------------------------------
     with tab_delivery:
         st.subheader("📦 納品書作成・管理")
@@ -569,38 +569,41 @@ if api_records:
             h_cust_keeping = clean_val(r.get("field-81", ""))
             
             sub_88 = r.get("field-88", [])
-            item_88 = sub_88[0] if isinstance(sub_88, list) and len(sub_88) > 0 else {}
-            rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
-            sub_88_id = extract_record_id(item_88)
+            if not isinstance(sub_88, list) or len(sub_88) == 0:
+                sub_88 = [{}]  # 明細がない場合でも1行分作成
+            
+            # ★サブテーブルの全行をループで展開
+            for item_88 in sub_88:
+                rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
+                sub_88_id = extract_record_id(item_88)
+                val_88_13 = clean_val(rec_88.get("field-88_13", ""))
 
-            val_88_13 = clean_val(rec_88.get("field-88_13", ""))
-
-            flat_data.append({
-                "更新": False,
-                "詳細": detail_url,
-                "納期": h_due,
-                "得意先名": h_pub,
-                "受注番号": h_ord_no,
-                "ISBN": h_isbn,
-                "書名": h_title,
-                "定価": h_price,
-                "判型": h_format,
-                "刷数": h_print_count,
-                "部数": clean_val(rec_88.get("field-88_4", "")),
-                "納品日": parse_date_safe(rec_88.get("field-88_2")),
-                "印": h_stamp,
-                "製品預かり": h_cust_keeping,
-                "預より納品": val_88_13,
-                "パレット数": clean_val(rec_88.get("field-88_7", "")),
-                "配本日": parse_date_safe(rec_88.get("field-88_2")),
-                "見本": clean_val(rec_88.get("field-88_8", "")),
-                "備考": clean_val(rec_88.get("field-88_5", "")),
-                "納品": False,
-                "配送振分": clean_val(rec_88.get("field-88_10", "")),
-                "_record_idx": record_idx,
-                "_recordId": rec_id,
-                "_sub_88_id": sub_88_id
-            })
+                flat_data.append({
+                    "更新": False,
+                    "詳細": detail_url,
+                    "納期": h_due,
+                    "得意先名": h_pub,
+                    "受注番号": h_ord_no,
+                    "ISBN": h_isbn,
+                    "書名": h_title,
+                    "定価": h_price,
+                    "判型": h_format,
+                    "刷数": h_print_count,
+                    "部数": clean_val(rec_88.get("field-88_4", "")),
+                    "納品日": parse_date_safe(rec_88.get("field-88_2")),
+                    "印": h_stamp,
+                    "製品預かり": h_cust_keeping,
+                    "預より納品": val_88_13,
+                    "パレット数": clean_val(rec_88.get("field-88_7", "")),
+                    "配本日": parse_date_safe(rec_88.get("field-88_2")),
+                    "見本": clean_val(rec_88.get("field-88_8", "")),
+                    "備考": clean_val(rec_88.get("field-88_5", "")),
+                    "納品": False,
+                    "配送振分": clean_val(rec_88.get("field-88_10", "")),
+                    "_record_idx": record_idx,
+                    "_recordId": rec_id,
+                    "_sub_88_id": sub_88_id
+                })
 
         df_deliv = pd.DataFrame(flat_data)
         display_cols = [
@@ -762,7 +765,7 @@ if api_records:
                 st.button("📥 納品データ Excel ダウンロード", disabled=True, help="「納品」チェックが1件も入っていません")
 
     # ------------------------------------------
-    # Tab 2: 請求処理
+    # Tab 2: 請求処理（サブテーブル全行展開対応）
     # ------------------------------------------
     with tab_billing:
         st.subheader("💰 請求処理・明細管理（field-89）")
@@ -807,56 +810,60 @@ if api_records:
             default_delivery_date = parse_date_safe(raw_deliv_date)
 
             sub_89 = r.get("field-89", [])
-            item_89 = sub_89[0] if isinstance(sub_89, list) and len(sub_89) > 0 else {}
-            rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
-            sub_89_id = extract_record_id(item_89)
+            if not isinstance(sub_89, list) or len(sub_89) == 0:
+                sub_89 = [{}]  # 請求明細がない場合でも1行分作成
 
-            # 請求区分 (field-89_11) の取得（デフォルトは「【未】」）
-            b_status = clean_val(rec_89.get("field-89_11", ""))
-            if not b_status:
-                b_status = "【未】"
+            # ★請求明細のサブテーブル全行をループで展開
+            for item_89 in sub_89:
+                rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
+                sub_89_id = extract_record_id(item_89)
 
-            # ★明細表示条件：請求区分が【済】のものは非表示にする
-            if b_status == "【済】":
-                continue
+                # 請求区分 (field-89_11) の取得（デフォルトは「【未】」）
+                b_status = clean_val(rec_89.get("field-89_11", ""))
+                if not b_status:
+                    b_status = "【未】"
 
-            b_sales_date = parse_date_safe(rec_89.get("field-89_1")) or default_delivery_date
-            b_item_name = clean_val(rec_89.get("field-89_2")) or h_title
-            b_qty = clean_val(rec_89.get("field-89_3")) or default_qty
-            b_unit_price = clean_val(rec_89.get("field-89_4")) or h_unit_price_default
-            b_memo = clean_val(rec_89.get("field-89_7"))
-            b_mihon = clean_val(rec_89.get("field-89_12")) or default_mihon
+                # ★明細表示条件：請求区分が【済】のものは非表示にする
+                if b_status == "【済】":
+                    continue
 
-            # 金額 (field-89_8) の自動計算（数量 × 単価）
-            try:
-                q_val = float(str(b_qty).replace(",", "")) if b_qty else 0
-            except:
-                q_val = 0
-            try:
-                p_val = float(str(b_unit_price).replace(",", "")) if b_unit_price else 0
-            except:
-                p_val = 0
-            
-            calc_amount = int(q_val * p_val)
-            b_amount = clean_val(rec_89.get("field-89_8"))
-            if not b_amount and calc_amount > 0:
-                b_amount = str(calc_amount)
+                b_sales_date = parse_date_safe(rec_89.get("field-89_1")) or default_delivery_date
+                b_item_name = clean_val(rec_89.get("field-89_2")) or h_title
+                b_qty = clean_val(rec_89.get("field-89_3")) or default_qty
+                b_unit_price = clean_val(rec_89.get("field-89_4")) or h_unit_price_default
+                b_memo = clean_val(rec_89.get("field-89_7"))
+                b_mihon = clean_val(rec_89.get("field-89_12")) or default_mihon
 
-            billing_flat_data.append({
-                "更新": False,
-                "請求区分": b_status,           # field-89_11
-                "得意先名": h_pub,
-                "受注番号": h_ord_no,
-                "売上日": b_sales_date,           # field-89_1
-                "品名": b_item_name,             # field-89_2
-                "数量": b_qty,                   # field-89_3
-                "販売単価": b_unit_price,        # field-89_4
-                "金額": b_amount,                # field-89_8 (自動計算)
-                "備考": b_memo,                  # field-89_7
-                "見本": b_mihon,                 # field-89_12
-                "_recordId": rec_id,
-                "_sub_89_id": sub_89_id
-            })
+                # 金額 (field-89_8) の自動計算（数量 × 単価）
+                try:
+                    q_val = float(str(b_qty).replace(",", "")) if b_qty else 0
+                except:
+                    q_val = 0
+                try:
+                    p_val = float(str(b_unit_price).replace(",", "")) if b_unit_price else 0
+                except:
+                    p_val = 0
+                
+                calc_amount = int(q_val * p_val)
+                b_amount = clean_val(rec_89.get("field-89_8"))
+                if not b_amount and calc_amount > 0:
+                    b_amount = str(calc_amount)
+
+                billing_flat_data.append({
+                    "更新": False,
+                    "請求区分": b_status,           # field-89_11
+                    "得意先名": h_pub,
+                    "受注番号": h_ord_no,
+                    "売上日": b_sales_date,           # field-89_1
+                    "品名": b_item_name,             # field-89_2
+                    "数量": b_qty,                   # field-89_3
+                    "販売単価": b_unit_price,        # field-89_4
+                    "金額": b_amount,                # field-89_8 (自動計算)
+                    "備考": b_memo,                  # field-89_7
+                    "見本": b_mihon,                 # field-89_12
+                    "_recordId": rec_id,
+                    "_sub_89_id": sub_89_id
+                })
 
         if billing_flat_data:
             df_billing = pd.DataFrame(billing_flat_data)
@@ -918,7 +925,6 @@ if api_records:
                                     b_error_messages.append(f"受注番号 {ord_no}: レコードIDが取得できませんでした")
                                     continue
 
-                                # 数量 × 単価を再計算して保存データに含める
                                 q_str = clean_val(row.get("数量", ""))
                                 p_str = clean_val(row.get("販売単価", ""))
                                 try:
@@ -937,7 +943,7 @@ if api_records:
                                         "field-89_2": clean_val(row.get("品名", "")),
                                         "field-89_3": q_str,
                                         "field-89_4": p_str,
-                                        "field-89_8": calc_amt,  # ★ 金額 (field-89_8) を自動保存
+                                        "field-89_8": calc_amt,
                                         "field-89_7": clean_val(row.get("備考", "")),
                                         "field-89_12": clean_val(row.get("見本", "")),
                                         "field-89_11": clean_val(row.get("請求区分", ""))
