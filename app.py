@@ -188,7 +188,7 @@ def update_pocket_record(record_id, update_data):
     except Exception as e:
         return False, str(e)
 
-# --- 納品書PDF生成関数（1ページ最大8レコード・1レコード2行表示） ---
+# --- 納品書PDF生成関数（1ページ最大8レコード・1レコード2行表示・グループ分け対応） ---
 def generate_delivery_pdf(grouped_deliv_dict):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=25, rightMargin=25, topMargin=25, bottomMargin=25)
@@ -204,7 +204,6 @@ def generate_delivery_pdf(grouped_deliv_dict):
     elements = []
     
     for idx, ((cust_name, d_date, shipping_div), items) in enumerate(grouped_deliv_dict.items()):
-        # 伝票番号生成: YYMMHHMM (グループの先頭受注番号をベースに生成)
         mmdd = d_date.replace("-", "")[2:6] if len(d_date) >= 10 else datetime.now().strftime("%m%d")
         base_ord = items[0]["受注番号"] if items else "000000"
         deliv_no = (base_ord + mmdd)[-10:].zfill(10)
@@ -293,7 +292,7 @@ def generate_delivery_pdf(grouped_deliv_dict):
     return buffer
 
 # ==========================================
-# 5. データ取得関数
+# 5. データ取得関数（ID抽出を堅牢化）
 # ==========================================
 query_params = st.query_params
 url_order_no = query_params.get("ord", None)
@@ -334,9 +333,19 @@ def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, t
                     rec_body = {}
                 
                 merged_body = {**item, **rec_body}
-                merged_body["_recordId"] = str(
-                    item.get("Id") or item.get("recordId") or rec_body.get("Id") or rec_body.get("recordId") or ""
-                ).strip()
+                
+                # レコードIDを確実に抽出
+                rec_id = (
+                    item.get("Id") or 
+                    item.get("id") or 
+                    item.get("ID") or 
+                    item.get("recordId") or 
+                    rec_body.get("Id") or 
+                    rec_body.get("id") or 
+                    rec_body.get("recordId") or 
+                    ""
+                )
+                merged_body["_recordId"] = str(rec_id).strip()
                 parsed_records.append(merged_body)
             
             if start_date and end_date:
@@ -408,19 +417,19 @@ if api_records:
         detail_url = f"{POCKET_BASE_URL}/apps/{APP_ID}/records/{rec_id}/detail" if rec_id and rec_id.lower() != "none" else ""
 
         h_ord_no = clean_val(r.get("field-2", ""))
-        h_due = parse_date_safe(r.get("field-52"))       # 納期 (field-52)
-        h_pub = clean_val(r.get("field-8", ""))       # 得意先名 (field-8)
+        h_due = parse_date_safe(r.get("field-52"))
+        h_pub = clean_val(r.get("field-8", ""))
         h_title = clean_val(r.get("field-13", ""))
-        h_price = clean_val(r.get("field-20", ""))      # 定価 (field-20)
-        h_format = clean_val(r.get("field-23", ""))     # 判型
-        h_print_count = clean_val(r.get("field-28", "")) # 刷数 (field-28)
-        h_stamp = clean_val(r.get("field-4", ""))       # 印 (field-4)
-        h_cust_keeping = clean_val(r.get("field-81", "")) # 製品預かり (field-81)
+        h_price = clean_val(r.get("field-20", ""))
+        h_format = clean_val(r.get("field-23", ""))
+        h_print_count = clean_val(r.get("field-28", ""))
+        h_stamp = clean_val(r.get("field-4", ""))
+        h_cust_keeping = clean_val(r.get("field-81", ""))
         
-        sub_88 = r.get("field-88", [])                  # 納品サブテーブル
+        sub_88 = r.get("field-88", [])
         item_88 = sub_88[0] if isinstance(sub_88, list) and len(sub_88) > 0 else {}
         rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
-        sub_88_id = str(item_88.get("Id") or item_88.get("recordId") or rec_88.get("Id") or "").strip()
+        sub_88_id = str(item_88.get("Id") or item_88.get("id") or item_88.get("recordId") or rec_88.get("Id") or "").strip()
 
         val_88_13 = clean_val(rec_88.get("field-88_13", ""))
 
@@ -491,7 +500,7 @@ if api_records:
         }
     )
 
-    # --- 保存 ＆ 納品書出力ボタンの処理 ---
+    # --- 保存 ＆ 納品書出力ボタンの処理（受注番号ベース＋フォールバック検索対応） ---
     st.markdown("---")
     col_save, col_pdf, col_excel = st.columns([1.5, 1.5, 1.5])
     
@@ -505,9 +514,38 @@ if api_records:
                 error_messages = []
                 with st.spinner("@pocketへデータを保存中..."):
                     for _, row in update_rows.iterrows():
-                        r_id = row.get("_recordId", "")
-                        sub_88_id = row.get("_sub_88_id", "")
+                        r_id = clean_val(row.get("_recordId", ""))
+                        ord_no = clean_val(row.get("受注番号", ""))
+                        sub_88_id = clean_val(row.get("_sub_88_id", ""))
                         
+                        # レコードIDがない場合、メインキー「受注番号」を使ってAPIから該当レコードのIDを逆引き取得（フォールバック）
+                        if not r_id and ord_no:
+                            search_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
+                            search_headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
+                            search_params = {"query": f'field-2 = "{ord_no}"'}
+                            try:
+                                s_res = requests.get(search_url, headers=search_headers, params=search_params, timeout=10)
+                                if s_res.status_code == 200:
+                                    s_data = s_res.json()
+                                    s_items = s_data.get("records", s_data.get("Data", s_data.get("Records", [])))
+                                    if s_items and isinstance(s_items, list):
+                                        first_item = s_items[0]
+                                        rec_body_sub = first_item.get("record", {})
+                                        r_id = str(
+                                            first_item.get("Id") or 
+                                            first_item.get("id") or 
+                                            first_item.get("recordId") or 
+                                            rec_body_sub.get("Id") or 
+                                            ""
+                                        ).strip()
+                            except Exception:
+                                pass
+
+                        if not r_id:
+                            error_messages.append(f"受注番号 {ord_no}: レコードIDが取得できませんでした")
+                            continue
+
+                        # 明細はレコードIDを採取してから上書き
                         sub_88_item = {
                             "record": {
                                 "field-88_2": date_to_str(row.get("納品日")),
@@ -522,8 +560,9 @@ if api_records:
                         if sub_88_id:
                             sub_88_item["Id"] = sub_88_id
 
+                        # メインキー（受注番号）を含めたペイロード
                         payload = {
-                            "field-2": clean_val(row.get("受注番号", "")),
+                            "field-2": ord_no,
                             "field-88": [sub_88_item]
                         }
                         
@@ -531,7 +570,7 @@ if api_records:
                         if ok:
                             success_count += 1
                         else:
-                            error_messages.append(f"ID {r_id}: {msg}")
+                            error_messages.append(f"受注番号 {ord_no}: {msg}")
                 
                 if success_count > 0:
                     st.success(f"✨ **{success_count} 件** のデータを @pocket へ正常に保存しました！")
@@ -554,7 +593,7 @@ if api_records:
                 d_date_str = date_to_str(row.get("納品日"))
                 shipping_div = clean_val(row.get("配送振分", ""))
                 
-                # キーを (得意先名, 納品日, 配送振分) に設定してグループ化
+                # グループ条件：顧客名、同じ納品日、配送振分
                 key = (cust_name, d_date_str, shipping_div)
                 
                 grouped_deliv[key].append({
