@@ -312,8 +312,8 @@ def generate_delivery_pdf(grouped_deliv_dict):
     buffer.seek(0)
     return buffer
 
-# --- 請求書PDF生成関数 ---
-def generate_billing_pdf(grouped_billing_dict):
+# --- 請求書PDF生成関数（振込先・備考反映対応） ---
+def generate_billing_pdf(grouped_billing_dict, bank_info, billing_memo):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=25, rightMargin=25, topMargin=25, bottomMargin=25)
     styles = getSampleStyleSheet()
@@ -412,6 +412,26 @@ def generate_billing_pdf(grouped_billing_dict):
         b_table = Table(table_data, colWidths=col_widths)
         b_table.setStyle(TableStyle(t_styles))
         elements.append(b_table)
+        elements.append(Spacer(1, 8))
+
+        # 振込先口座情報 ＆ 備考の表示セクション
+        footer_data = [
+            [
+                Paragraph(f"<b>【お振込先】</b><br/>{bank_info.replace(chr(10), '<br/>') if bank_info else ''}", h_style),
+                Paragraph(f"<b>【備考】</b><br/>{billing_memo.replace(chr(10), '<br/>') if billing_memo else ''}", h_style)
+            ]
+        ]
+        footer_table = Table(footer_data, colWidths=[380, 412])
+        footer_table.setStyle(TableStyle([
+            ("VALIGN", (0,0), (-1,-1), "TOP"),
+            ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#F1F5F9")),
+            ("BOX", (0,0), (-1,-1), 0.5, colors.HexColor("#CBD5E1")),
+            ("TOPPADDING", (0,0), (-1,-1), 6),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+            ("LEFTPADDING", (0,0), (-1,-1), 6),
+            ("RIGHTPADDING", (0,0), (-1,-1), 6),
+        ]))
+        elements.append(footer_table)
 
     doc.build(elements)
     buffer.seek(0)
@@ -746,7 +766,25 @@ if api_records:
     # ------------------------------------------
     with tab_billing:
         st.subheader("💰 請求処理・明細管理（field-89）")
-        st.info("💡 納品タブの納品日が入力されているデータのみ表示されています。売上日（field-89_1）は顧客指定に合わせて手入力・変更可能です。")
+        st.info("💡 納品日が入力済みで、請求区分が【未】のデータが表示されています。請求区分を【済】にすると非表示になります。")
+
+        # 請求書PDF用オプション入力欄
+        with st.expander("🛠️ 請求書PDF出力オプション（振込先・備考の設定）", expanded=False):
+            col_b1, col_b2 = st.columns(2)
+            with col_b1:
+                bank_info_input = st.text_area(
+                    "🏦 振込先口座情報", 
+                    value="三菱UFJ銀行 岩槻支店\n普通 1234567\nカ）ナカエイセイホンショ", 
+                    height=90,
+                    help="請求書PDFのフッターに記載されるお振込先情報です"
+                )
+            with col_b2:
+                billing_memo_input = st.text_area(
+                    "📝 請求備考", 
+                    value="いつもご利用いただきありがとうございます。\n誠に勝手ながら、上記金額のお振込をお願い申し上げます。", 
+                    height=90,
+                    help="請求書PDFのフッターに記載される備考・メッセージです"
+                )
 
         billing_flat_data = []
         for record_idx, r in enumerate(api_records):
@@ -762,7 +800,7 @@ if api_records:
             
             raw_deliv_date = clean_val(rec_88.get("field-88_2", ""))
             if not raw_deliv_date:
-                continue
+                continue  # 納品日未入力は除外
 
             default_mihon = clean_val(rec_88.get("field-88_8", ""))
             default_qty = clean_val(rec_88.get("field-88_4", ""))
@@ -773,6 +811,15 @@ if api_records:
             rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
             sub_89_id = extract_record_id(item_89)
 
+            # 請求区分 (field-89_11) の取得（デフォルトは「【未】」）
+            b_status = clean_val(rec_89.get("field-89_11", ""))
+            if not b_status:
+                b_status = "【未】"
+
+            # ★明細表示条件：請求区分が【済】のものは非表示にする
+            if b_status == "【済】":
+                continue
+
             b_sales_date = parse_date_safe(rec_89.get("field-89_1")) or default_delivery_date
             b_item_name = clean_val(rec_89.get("field-89_2")) or h_title
             b_qty = clean_val(rec_89.get("field-89_3")) or default_qty
@@ -782,21 +829,22 @@ if api_records:
 
             billing_flat_data.append({
                 "更新": False,
+                "請求区分": b_status,           # field-89_11
                 "得意先名": h_pub,
                 "受注番号": h_ord_no,
-                "売上日": b_sales_date,
-                "品名": b_item_name,
-                "数量": b_qty,
-                "販売単価": b_unit_price,
-                "備考": b_memo,
-                "見本": b_mihon,
+                "売上日": b_sales_date,           # field-89_1
+                "品名": b_item_name,             # field-89_2
+                "数量": b_qty,                   # field-89_3
+                "販売単価": b_unit_price,        # field-89_4
+                "備考": b_memo,                  # field-89_7
+                "見本": b_mihon,                 # field-89_12
                 "_recordId": rec_id,
                 "_sub_89_id": sub_89_id
             })
 
         if billing_flat_data:
             df_billing = pd.DataFrame(billing_flat_data)
-            billing_display_cols = ["更新", "得意先名", "受注番号", "売上日", "品名", "数量", "販売単価", "備考", "見本"]
+            billing_display_cols = ["更新", "請求区分", "得意先名", "受注番号", "売上日", "品名", "数量", "販売単価", "備考", "見本"]
             df_billing_display = df_billing[[c for c in billing_display_cols if c in df_billing.columns]]
 
             edited_billing_df = st.data_editor(
@@ -806,9 +854,10 @@ if api_records:
                 use_container_width=True,
                 column_config={
                     "更新": st.column_config.CheckboxColumn("更新", required=True, help="チェックを入れた行の請求明細を@pocketに保存します"),
+                    "請求区分": st.column_config.SelectboxColumn("請求区分", options=["【未】", "【済】"], help="請求ステータス（field-89_11）※【済】にすると非表示になります"),
                     "得意先名": st.column_config.TextColumn("得意先名", disabled=True),
                     "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
-                    "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD", help="売上日（field-89_1）※顧客指定に合わせて手入力可能"),
+                    "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD", help="売上日（field-89_1）"),
                     "品名": st.column_config.TextColumn("品名", help="品名（field-89_2）"),
                     "数量": st.column_config.TextColumn("数量", help="数量（field-89_3）"),
                     "販売単価": st.column_config.TextColumn("販売単価", help="販売単価（field-89_4）"),
@@ -859,7 +908,8 @@ if api_records:
                                         "field-89_3": clean_val(row.get("数量", "")),
                                         "field-89_4": clean_val(row.get("販売単価", "")),
                                         "field-89_7": clean_val(row.get("備考", "")),
-                                        "field-89_12": clean_val(row.get("見本", ""))
+                                        "field-89_12": clean_val(row.get("見本", "")),
+                                        "field-89_11": clean_val(row.get("請求区分", ""))  # ★ 請求区分保存
                                     }
                                 }
                                 if sub_89_id:
@@ -886,7 +936,6 @@ if api_records:
                                 st.error(f"❌ 保存エラー: {err}")
 
             with b_col_pdf:
-                # 請求書PDFダウンロード（表示されている全請求データを対象）
                 from collections import defaultdict
                 grouped_billing = defaultdict(list)
                 for _, row in edited_billing_df.iterrows():
@@ -901,7 +950,7 @@ if api_records:
                         "見本": clean_val(row.get("見本", "0"))
                     })
 
-                billing_pdf_bytes = generate_billing_pdf(grouped_billing)
+                billing_pdf_bytes = generate_billing_pdf(grouped_billing, bank_info_input, billing_memo_input)
                 st.download_button(
                     label="🖨️ 請求書 PDF ダウンロード",
                     data=billing_pdf_bytes,
@@ -919,7 +968,7 @@ if api_records:
                 )
 
         else:
-            st.info("ℹ️ 納品日が入力されている対象データがまだありません。「納品書作成タブ」側で納品日を入力・保存してください。")
+            st.info("ℹ️ 現在表示対象の未請求データ（請求区分【未】）はありません。")
 
 else:
     st.warning("⚠️ 対象データが見つかりませんでした。上部の検索条件からデータを取得してください。")
