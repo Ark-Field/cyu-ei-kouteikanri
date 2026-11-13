@@ -9,17 +9,16 @@ import streamlit as st
 
 # ReportLab関連のインポート（PDF出力用）
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A3, A4, landscape, portrait
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle, PageBreak
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 
 # ==========================================
 # 1. ページ基本設定 ＆ 濃紺シックデザインCSS
 # ==========================================
-st.set_page_config(page_title="受注一覧表・管理システム", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="納品書作成システム", layout="wide", initial_sidebar_state="collapsed")
 
 dark_navy_theme_css = """
     <style>
@@ -82,7 +81,7 @@ dark_navy_theme_css = """
 """
 st.markdown(dark_navy_theme_css, unsafe_allow_html=True)
 
-st.title("📊 受注一覧表日付入力 ＆ 付物納期・納品書・請求書")
+st.title("📦 納品書作成システム（@pocket連動）")
 
 # ==========================================
 # 2. 日本語フォント登録処理（ReportLab用）
@@ -123,7 +122,7 @@ else:
 APP_ID = 34  # @pocket対象アプリID
 
 # ==========================================
-# 4. 便利関数（データクリーニング・日付パース・ファイル出力）
+# 4. 便利関数
 # ==========================================
 def clean_val(val):
     if val is None:
@@ -151,6 +150,14 @@ def parse_date_safe(val):
     except ValueError:
         return None
 
+def date_to_str(val):
+    if pd.isna(val) or not val:
+        return ""
+    if isinstance(val, (date, datetime)):
+        return val.strftime("%Y-%m-%d")
+    parsed = parse_date_safe(val)
+    return parsed.strftime("%Y-%m-%d") if parsed else ""
+
 def to_excel_bytes(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -158,417 +165,143 @@ def to_excel_bytes(df):
     output.seek(0)
     return output
 
-# --- 受注一覧表のPDF生成（出版社名を書名の前に配置・7文字幅相当・顧客別は自然改ページ） ---
-def generate_order_pdf(df, group_type="publisher"):
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A3), leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=16, leading=18, textColor=colors.HexColor("#1E3A8A"))
-    pub_header_style = ParagraphStyle("PubHeader", parent=styles["Normal"], fontName=FONT_NAME, fontSize=11, leading=14, textColor=colors.HexColor("#1E3A8A"), spaceBefore=8, spaceAfter=4)
-    header_style = ParagraphStyle("Header", parent=styles["Normal"], fontName=FONT_NAME, fontSize=8, leading=10, textColor=colors.white, alignment=1)
-    cell_style = ParagraphStyle("Cell", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7.5, leading=9.5, textColor=colors.HexColor("#1E293B"))
-    bold_cell_style = ParagraphStyle("BoldCell", parent=cell_style, fontName=FONT_NAME) # 太字対応用
+# --- @pocket データ更新用関数 ---
+def update_pocket_record(record_id, update_data):
+    if not record_id:
+        return False, "レコードIDが不正です"
+    url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records/{record_id}"
+    headers = {
+        "X-At-Pocket-API-Key": POCKET_API_KEY,
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "apiVersion": 1.1,
+        "record": update_data
+    }
+    try:
+        response = requests.put(url, headers=headers, json=payload, timeout=20)
+        if response.status_code in [200, 204]:
+            return True, "成功"
+        else:
+            return False, f"HTTP {response.status_code}: {response.text}"
+    except Exception as e:
+        return False, str(e)
 
-    group_label_text = "顧客グループ別（出版社順）" if group_type == "publisher" else "判型グループ別（判型順）"
-    elements = [
-        Paragraph(f"<b>受注一覧表 ＆ 工程・納品・請求管理（{group_label_text}）</b>", title_style),
-        Spacer(1, 4),
-        Paragraph(f"<font size=8 color='#64748B'>発行日: {date.today().strftime('%Y年%m月%d日')}</font>", styles["Normal"]),
-        Spacer(1, 8),
-    ]
-
-    # 出版社名を書名の直前に配置
-    pdf_target_cols = [
-        "受注番号", "受注日", "納期", "納期上/中/下", "急ぎ",
-        "出版社名", "書名", "ISBN", "判型", "総頁数", "製本数", "製品預かり", "32P", "16P", "8P", "4P", "2P",
-        "印刷所", "折", "折本日", "無線日", "三方日", "仕上日", "見本納入日", "入品日", "備考"
-    ]
-    target_cols = [c for c in pdf_target_cols if c in df.columns]
-
-    if group_type == "publisher":
-        # 顧客グループ別：用紙から溢れたら改ページ（グループごとの強制改ページなしで全体を1つのテーブルまたは自然な改ページにする）
-        table_data = [[Paragraph(f"<b>{c}</b>", header_style) for c in target_cols]]
-        for _, row in df.iterrows():
-            table_data.append([Paragraph(str(row[c]) if pd.notna(row[c]) else "", cell_style) for c in target_cols])
-
-        total_width = 1151
-        col_widths = []
-        for c in target_cols:
-            if c in ["受注日", "納期", "折本日", "無線日", "三方日", "仕上日", "見本納入日", "入品日"]:
-                col_widths.append(60)
-            elif c == "出版社名":
-                col_widths.append(75) # 7文字幅相当
-            elif c == "書名":
-                col_widths.append(130)
-            elif c in ["総頁数", "製品預かり", "32P", "16P", "8P", "4P", "2P", "折", "納期上/中/下", "急ぎ"]:
-                col_widths.append(38)
-            elif c == "印刷所":
-                col_widths.append(50)
-            elif c == "備考":
-                col_widths.append(85)
-            elif c in ["ISBN", "判型"]:
-                col_widths.append(55)
-            elif c == "受注番号":
-                col_widths.append(55)
-            else:
-                col_widths.append(45)
-                
-        current_total = sum(col_widths)
-        if current_total != total_width and len(col_widths) > 0:
-            diff = (total_width - current_total) / len(col_widths)
-            col_widths = [w + diff for w in col_widths]
-
-        t = Table(table_data, colWidths=col_widths, repeatRows=1)
-        t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
-            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
-        ]))
-        elements.append(t)
-    else:
-        # 判型グループ別：判型ごとにページを分ける（従来通り）
-        group_col = "判型"
-        groups = df[group_col].unique() if group_col in df.columns else [""]
-
-        for idx, g_val in enumerate(groups):
-            if idx > 0:
-                elements.append(PageBreak())
-            
-            g_name_display = g_val if g_val else "（未設定）"
-            elements.append(Paragraph(f"<b>■ 判型: {g_name_display}</b>", pub_header_style))
-            
-            sub_df = df[df[group_col] == g_val] if g_val else df
-
-            table_data = [[Paragraph(f"<b>{c}</b>", header_style) for c in target_cols]]
-            for _, row in sub_df.iterrows():
-                table_data.append([Paragraph(str(row[c]) if pd.notna(row[c]) else "", cell_style) for c in target_cols])
-
-            total_width = 1151
-            col_widths = []
-            for c in target_cols:
-                if c in ["受注日", "納期", "折本日", "無線日", "三方日", "仕上日", "見本納入日", "入品日"]:
-                    col_widths.append(60)
-                elif c == "出版社名":
-                    col_widths.append(75)
-                elif c == "書名":
-                    col_widths.append(130)
-                elif c in ["総頁数", "製品預かり", "32P", "16P", "8P", "4P", "2P", "折", "納期上/中/下", "急ぎ"]:
-                    col_widths.append(38)
-                elif c == "印刷所":
-                    col_widths.append(50)
-                elif c == "備考":
-                    col_widths.append(85)
-                elif c in ["ISBN", "判型"]:
-                    col_widths.append(55)
-                elif c == "受注番号":
-                    col_widths.append(55)
-                else:
-                    col_widths.append(45)
-                    
-            current_total = sum(col_widths)
-            if current_total != total_width and len(col_widths) > 0:
-                diff = (total_width - current_total) / len(col_widths)
-                col_widths = [w + diff for w in col_widths]
-
-            t = Table(table_data, colWidths=col_widths, repeatRows=1)
-            t.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
-                ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
-            ]))
-            elements.append(t)
-            elements.append(Spacer(1, 8))
-
-    doc.build(elements)
-    buffer.seek(0)
-    return buffer
-
-# --- 付物明細一覧表のPDF生成（出版社名を書名の前に配置） ---
-def generate_accessory_pdf(df, group_type="publisher"):
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=20, rightMargin=20, topMargin=20, bottomMargin=20)
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=14, leading=16, textColor=colors.HexColor("#1E3A8A"))
-    pub_header_style = ParagraphStyle("PubHeader", parent=styles["Normal"], fontName=FONT_NAME, fontSize=10, leading=13, textColor=colors.HexColor("#1E3A8A"), spaceBefore=4, spaceAfter=4)
-    header_style = ParagraphStyle("Header", parent=styles["Normal"], fontName=FONT_NAME, fontSize=8, leading=10, textColor=colors.white, alignment=1)
-    cell_style = ParagraphStyle("Cell", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7.5, leading=9, textColor=colors.HexColor("#1E293B"))
-
-    group_label_text = "顧客グループ別" if group_type == "publisher" else "判型グループ別"
-    elements = [
-        Paragraph(f"<b>付物明細一覧表（表・カバー・帯・カード / {group_label_text}）</b>", title_style),
-        Spacer(1, 6),
-        Paragraph(f"<font size=8 color='#64748B'>発行日: {date.today().strftime('%Y年%m月%d日')}</font>", styles["Normal"]),
-        Spacer(1, 10),
-    ]
-
-    exclude_cols = ["更新", "_record_idx", "_sub_idx", "詳細"]
-    target_cols = [c for c in df.columns if c not in exclude_cols]
-
-    if group_type == "publisher":
-        table_data = [[Paragraph(f"<b>{c}</b>", header_style) for c in target_cols]]
-        for _, row in df.iterrows():
-            table_data.append([Paragraph(str(row[c]) if pd.notna(row[c]) else "", cell_style) for c in target_cols])
-
-        col_w = 772 / len(target_cols)
-        t = Table(table_data, colWidths=[col_w] * len(target_cols), repeatRows=1)
-        t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
-            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
-        ]))
-        elements.append(t)
-    else:
-        group_col = "判型"
-        groups = df[group_col].unique() if group_col in df.columns else [""]
-
-        for idx, g_val in enumerate(groups):
-            if idx > 0:
-                elements.append(PageBreak())
-            
-            g_name_display = g_val if g_val else "（未設定）"
-            elements.append(Paragraph(f"<b>■ 判型: {g_name_display}</b>", pub_header_style))
-
-            sub_df = df[df[group_col] == g_val] if g_val else df
-
-            table_data = [[Paragraph(f"<b>{c}</b>", header_style) for c in target_cols]]
-            for _, row in sub_df.iterrows():
-                table_data.append([Paragraph(str(row[c]) if pd.notna(row[c]) else "", cell_style) for c in target_cols])
-
-            col_w = 772 / len(target_cols)
-            t = Table(table_data, colWidths=[col_w] * len(target_cols), repeatRows=1)
-            t.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
-                ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
-            ]))
-            elements.append(t)
-            elements.append(Spacer(1, 6))
-
-    doc.build(elements)
-    buffer.seek(0)
-    return buffer
-
-# --- 納品書PDF生成 ---
+# --- 納品書PDF生成関数（1ページ最大8レコード・1レコード2行表示） ---
 def generate_delivery_pdf(grouped_deliv_dict):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=25, rightMargin=25, topMargin=25, bottomMargin=25)
     styles = getSampleStyleSheet()
     
-    title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=20, leading=22, alignment=1, textColor=colors.HexColor("#1E3A8A"))
-    h_style = ParagraphStyle("H", parent=styles["Normal"], fontName=FONT_NAME, fontSize=10, leading=14, textColor=colors.HexColor("#333333"))
-    th_style = ParagraphStyle("TH", parent=styles["Normal"], fontName=FONT_NAME, fontSize=9, leading=11, textColor=colors.white, alignment=1)
-    td_style = ParagraphStyle("TD", parent=styles["Normal"], fontName=FONT_NAME, fontSize=9, leading=12, textColor=colors.HexColor("#1E293B"))
+    title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=16, leading=18, alignment=1, textColor=colors.HexColor("#1E3A8A"))
+    h_style = ParagraphStyle("H", parent=styles["Normal"], fontName=FONT_NAME, fontSize=9, leading=12, textColor=colors.HexColor("#333333"))
+    th_style = ParagraphStyle("TH", parent=styles["Normal"], fontName=FONT_NAME, fontSize=8, leading=10, textColor=colors.white, alignment=1)
+    td_style = ParagraphStyle("TD", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7.5, leading=9.5, textColor=colors.HexColor("#1E293B"))
     td_right = ParagraphStyle("TDR", parent=td_style, alignment=2)
+    td_sub_style = ParagraphStyle("TDSub", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7, leading=9, textColor=colors.HexColor("#475569"))
 
     elements = []
     
-    for idx, ((d_date, car_div, pub_name, deliv_no), items) in enumerate(grouped_deliv_dict.items()):
-        if idx > 0:
-            elements.append(PageBreak())
-            
-        elements.append(Paragraph("<b>納 品 書</b>", title_style))
-        elements.append(Spacer(1, 10))
+    for idx, ((d_date, cust_name, deliv_no), items) in enumerate(grouped_deliv_dict.items()):
+        # 1ページあたり最大8レコードに分割
+        chunk_size = 8
+        item_chunks = [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
         
-        meta_data = [
-            [
-                Paragraph(f"<b>{pub_name if pub_name else '（出版社名未設定）'} 御中</b>", ParagraphStyle("CName", parent=h_style, fontSize=14, leading=16)),
-                Paragraph("<b>(株)中永製本所</b><br/>埼玉県さいたま市岩槻区真福寺1400<br/>TEL 048-798-7377", ParagraphStyle("SInfo", parent=h_style, alignment=2))
-            ],
-            [
-                Paragraph(f"納品書番号: {deliv_no}<br/>納品日: {d_date if d_date else '（未設定）'}<br/>配車区分: {car_div if car_div else '（未設定）'}", h_style),
-                Paragraph(f"発行日: {date.today().strftime('%Y年%m月%d日')}", ParagraphStyle("DateInfo", parent=h_style, alignment=2))
+        for chunk_idx, chunk_items in enumerate(item_chunks):
+            if idx > 0 or chunk_idx > 0:
+                elements.append(PageBreak())
+                
+            elements.append(Paragraph("<b>納 品 書</b>", title_style))
+            elements.append(Spacer(1, 6))
+            
+            meta_data = [
+                [
+                    Paragraph(f"<b>{cust_name if cust_name else '（得意先名未設定）'} 御中</b>", ParagraphStyle("CName", parent=h_style, fontSize=12, leading=14)),
+                    Paragraph("<b>(株)中永製本所</b><br/>埼玉県さいたま市岩槻区真福寺1400<br/>TEL 048-798-7377", ParagraphStyle("SInfo", parent=h_style, alignment=2))
+                ],
+                [
+                    Paragraph(f"伝票番号: {deliv_no}<br/>納品日: {d_date if d_date else '（未設定）'}", h_style),
+                    Paragraph(f"発行日: {date.today().strftime('%Y年%m月%d日')}", ParagraphStyle("DateInfo", parent=h_style, alignment=2))
+                ]
             ]
-        ]
-        meta_table = Table(meta_data, colWidths=[400, 372])
-        meta_table.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP"), ("BOTTOMPADDING", (0,0), (-1,-1), 6)]))
-        elements.append(meta_table)
-        elements.append(Spacer(1, 10))
-        
-        elements.append(Paragraph("下記のとおり納品いたしました。", h_style))
-        elements.append(Spacer(1, 6))
-        
-        table_data = [[
-            Paragraph("書名 （製本数）", th_style),
-            Paragraph("数量", th_style),
-            Paragraph("PL数", th_style),
-            Paragraph("見本数", th_style),
-            Paragraph("備考", th_style)
-        ]]
-        
-        for item in items:
-            title_display = f"{item['書名']} （{item['製本数']}部）" if item['書名'] else '（書名なし）'
-            table_data.append([
-                Paragraph(title_display, td_style),
-                Paragraph(f"{item['数量']} 部", td_right),
-                Paragraph(f"{item['PL数']} PL", td_right),
-                Paragraph(f"{item['見本数']} 部", td_right),
-                Paragraph(item['備考'], td_style)
-            ])
+            meta_table = Table(meta_data, colWidths=[400, 392])
+            meta_table.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP"), ("BOTTOMPADDING", (0,0), (-1,-1), 2)]))
+            elements.append(meta_table)
+            elements.append(Spacer(1, 4))
             
-        d_table = Table(table_data, colWidths=[312, 100, 80, 80, 200])
-        d_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-            ("TOPPADDING", (0, 0), (-1, -1), 6),
-            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
-        ]))
-        elements.append(d_table)
-
-    doc.build(elements)
-    buffer.seek(0)
-    return buffer
-
-# --- 請求書PDF生成 ---
-def generate_invoice_pdf(grouped_invoice_dict, bank_info):
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=portrait(A4), leftMargin=25, rightMargin=25, topMargin=25, bottomMargin=25)
-    styles = getSampleStyleSheet()
-    
-    title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=20, leading=22, alignment=1, textColor=colors.HexColor("#1E3A8A"))
-    h_style = ParagraphStyle("H", parent=styles["Normal"], fontName=FONT_NAME, fontSize=10, leading=14, textColor=colors.HexColor("#333333"))
-    th_style = ParagraphStyle("TH", parent=styles["Normal"], fontName=FONT_NAME, fontSize=9, leading=11, textColor=colors.white, alignment=1)
-    td_style = ParagraphStyle("TD", parent=styles["Normal"], fontName=FONT_NAME, fontSize=9, leading=12, textColor=colors.HexColor("#1E293B"))
-    td_right = ParagraphStyle("TDR", parent=td_style, alignment=2)
-
-    elements = []
-    
-    for idx, (pub_name, items) in enumerate(grouped_invoice_dict.items()):
-        if idx > 0:
-            elements.append(PageBreak())
+            elements.append(Paragraph("下記のとおり納品いたしました。", h_style))
+            elements.append(Spacer(1, 4))
             
-        sale_dates = [parse_date_safe(i["売上日"]) for i in items if parse_date_safe(i["売上日"])]
-        if sale_dates:
-            min_d = min(sale_dates).strftime('%Y年%m月%d日')
-            max_d = max(sale_dates).strftime('%Y年%m月%d日')
-            period_str = f"{min_d} ～ {max_d}" if min_d != max_d else min_d
-        else:
-            period_str = datetime.now().strftime('%Y年%m月度')
-
-        subtotal = 0
-        for item in items:
-            q_str = clean_val(item["請求数量"])
-            p_str = clean_val(item["請求単価"])
-            q_num = int(q_str) if q_str.isdigit() else 0
-            try:
-                p_num = float(p_str) if p_str else 0.0
-            except ValueError:
-                p_num = 0.0
-            subtotal += q_num * p_num
-        
-        tax_amount = round(subtotal * 0.10)
-        grand_total = subtotal + tax_amount
-
-        elements.append(Paragraph("<b>請 求 書</b>", title_style))
-        elements.append(Spacer(1, 10))
-        
-        meta_data = [
-            [
-                Paragraph(f"<b>{pub_name if pub_name else '（出版社名未設定）'} 御中</b>", ParagraphStyle("CName", parent=h_style, fontSize=14, leading=16)),
-                Paragraph("<b>(株)中永製本所</b><br/>埼玉県さいたま市岩槻区真福寺1400<br/>TEL 048-798-7377", ParagraphStyle("SInfo", parent=h_style, alignment=2))
-            ],
-            [
-                Paragraph("下記のとおりご請求申し上げます。", h_style),
-                Paragraph(f"発行日: {date.today().strftime('%Y年%m月%d日')}", ParagraphStyle("DateInfo", parent=h_style, alignment=2))
+            # 明細ヘッダー
+            table_data = [[
+                Paragraph("受注番号", th_style),
+                Paragraph("書名", th_style),
+                Paragraph("定価", th_style),
+                Paragraph("判型", th_style),
+                Paragraph("刷数", th_style),
+                Paragraph("部数", th_style),
+                Paragraph("パレット数", th_style),
+                Paragraph("見本", th_style)
+            ]]
+            
+            t_styles = [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
             ]
-        ]
-        meta_table = Table(meta_data, colWidths=[300, 245])
-        meta_table.setStyle(TableStyle([("VALIGN", (0,0), (-1,-1), "TOP"), ("BOTTOMPADDING", (0,0), (-1,-1), 6)]))
-        elements.append(meta_table)
-        elements.append(Spacer(1, 8))
-        
-        summary_text = f"<b>売上期間:</b> {period_str}<br/><b>ご請求金額合計（税込）: ￥{grand_total:,.0f}</b> （うち消費税額等: ￥{tax_amount:,.0f}）"
-        summary_table = Table([[Paragraph(summary_text, h_style)]], colWidths=[545])
-        summary_table.setStyle(TableStyle([
-            ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#F8F9FA")),
-            ("BOX", (0,0), (-1,-1), 1, colors.HexColor("#CED4DA")),
-            ("TOPPADDING", (0,0), (-1,-1), 8),
-            ("BOTTOMPADDING", (0,0), (-1,-1), 8),
-            ("LEFTPADDING", (0,0), (-1,-1), 10),
-            ("RIGHTPADDING", (0,0), (-1,-1), 10),
-        ]))
-        elements.append(summary_table)
-        elements.append(Spacer(1, 10))
-        
-        table_data = [[
-            Paragraph("納品日", th_style),
-            Paragraph("書名", th_style),
-            Paragraph("請求数量", th_style),
-            Paragraph("請求単価", th_style),
-            Paragraph("内見本数", th_style),
-            Paragraph("金額", th_style),
-            Paragraph("備考", th_style)
-        ]]
-        
-        for item in items:
-            q_str = clean_val(item["請求数量"])
-            p_str = clean_val(item["請求単価"])
-            q_num = int(q_str) if q_str.isdigit() else 0
-            try:
-                p_num = float(p_str) if p_str else 0.0
-            except ValueError:
-                p_num = 0.0
-            line_total = q_num * p_num
             
-            table_data.append([
-                Paragraph(clean_val(item["売上日"]), td_style),
-                Paragraph(item["書名"], td_style),
-                Paragraph(f"{q_num} 部", td_right),
-                Paragraph(f"￥{p_num:,.2f}", td_right),
-                Paragraph(f"{clean_val(item['内見本数量'])} 部", td_right),
-                Paragraph(f"￥{line_total:,.2f}", td_right),
-                Paragraph(item["備考"], td_style)
-            ])
-            
-        inv_table = Table(table_data, colWidths=[60, 140, 50, 60, 50, 75, 110])
-        inv_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("BOTTOMPADDING", (0, 0), (-1,-1), 5),
-            ("TOPPADDING", (0, 0), (-1,-1), 5),
-            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
-        ]))
-        elements.append(inv_table)
-        elements.append(Spacer(1, 10))
-        
-        bank_text = f"<b>【お振込先口座】</b><br/>{bank_info['bank_name']} {bank_info['bank_branch']} ({bank_info['bank_type']}) {bank_info['bank_account']}<br/>口座名義: {bank_info['bank_holder']}"
-        bank_table = Table([[Paragraph(bank_text, td_style)]], colWidths=[280])
-        bank_table.setStyle(TableStyle([
-            ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#F9F9F9")),
-            ("BOX", (0,0), (-1,-1), 1, colors.HexColor("#333333")),
-            ("TOPPADDING", (0,0), (-1,-1), 6),
-            ("BOTTOMPADDING", (0,0), (-1,-1), 6),
-            ("LEFTPADDING", (0,0), (-1,-1), 8),
-            ("RIGHTPADDING", (0,0), (-1,-1), 8),
-        ]))
-        elements.append(bank_table)
+            row_idx = 1
+            for item in chunk_items:
+                # ①行目（上段）：受注番号｜書名｜定価｜判型｜刷数｜部数｜パレット数｜見本
+                table_data.append([
+                    Paragraph(item['受注番号'], td_style),
+                    Paragraph(item['書名'], td_style),
+                    Paragraph(item['定価'], td_right),
+                    Paragraph(item['判型'], td_style),
+                    Paragraph(item['刷数'], td_right),
+                    Paragraph(f"{item['部数']} 部", td_right),
+                    Paragraph(f"{item['パレット数']} PL", td_right),
+                    Paragraph(f"{item['見本']} 部", td_right)
+                ])
+                # ②行目（下段）：備考（15文字幅）｜印（4字幅）｜製品預かり（4字幅）｜預より納品（3字幅）｜配本日（3.5字幅）
+                table_data.append([
+                    Paragraph(f"<b>備考:</b> {item['備考']}", td_sub_style), "", "", "",
+                    Paragraph(f"<b>印:</b> {item['印']}", td_sub_style),
+                    Paragraph(f"<b>製品預:</b> {item['製品預かり']}", td_sub_style),
+                    Paragraph(f"<b>預納品:</b> {item['預より納品']}", td_sub_style),
+                    Paragraph(f"<b>配本:</b> {item['配本日']}", td_sub_style)
+                ])
+                
+                # 下段の備考欄を上段の主要カラム（0〜3列目）まで結合
+                t_styles.append(("SPAN", (0, row_idx + 1), (3, row_idx + 1)))
+                # レコードごとに背景色を交互に設定
+                bg_color = colors.HexColor("#F8FAFC") if (row_idx // 2) % 2 == 1 else colors.white
+                t_styles.append(("BACKGROUND", (0, row_idx), (-1, row_idx + 1), bg_color))
+                
+                row_idx += 2
+                
+            # カラム幅定義（合計792pt）
+            col_widths = [70, 272, 50, 45, 45, 55, 100, 55]
+            d_table = Table(table_data, colWidths=col_widths)
+            d_table.setStyle(TableStyle(t_styles))
+            elements.append(d_table)
 
     doc.build(elements)
     buffer.seek(0)
     return buffer
 
 # ==========================================
-# 5. URLパラメータのチェック ＆ データ取得関数
+# 5. データ取得関数
 # ==========================================
 query_params = st.query_params
 url_order_no = query_params.get("ord", None)
 
-def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, target_publisher=None, date_field="field-1"):
+def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, target_publisher=None, date_field="field-52"):
     url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records"
     headers = {"X-At-Pocket-API-Key": POCKET_API_KEY, "Accept": "application/json"}
-    
     params = {}
     
     if target_order_no:
@@ -579,10 +312,8 @@ def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, t
             start_str = start_date.strftime("%Y-%m-%d")
             end_str = end_date.strftime("%Y-%m-%d")
             query_parts.append(f'{date_field} >= "{start_str}" and {date_field} <= "{end_str}"')
-        
         if target_publisher:
             query_parts.append(f'field-8 like "{target_publisher}"')
-        
         if query_parts:
             params["query"] = " and ".join(query_parts)
     
@@ -605,45 +336,28 @@ def fetch_pocket_records(start_date=None, end_date=None, target_order_no=None, t
                 
                 merged_body = {**item, **rec_body}
                 merged_body["_recordId"] = str(
-                    item.get("Id") or 
-                    item.get("recordId") or 
-                    rec_body.get("Id") or 
-                    rec_body.get("recordId") or 
-                    item.get("ResultId") or ""
+                    item.get("Id") or item.get("recordId") or rec_body.get("Id") or rec_body.get("recordId") or ""
                 ).strip()
                 parsed_records.append(merged_body)
             
-            if target_order_no and parsed_records:
-                matched = [r for r in parsed_records if str(r.get("field-2", "")) == str(target_order_no)]
-                if matched:
-                    return matched
-            
-            filtered_records = []
-            start_str = start_date.strftime("%Y-%m-%d") if start_date else None
-            end_str = end_date.strftime("%Y-%m-%d") if end_date else None
-            
-            for r in parsed_records:
-                if start_str and end_str:
-                    raw_date_str = str(r.get(date_field, ""))
-                    if not raw_date_str or raw_date_str.lower() in ["nan", "none"]:
+            if start_date and end_date:
+                start_str = start_date.strftime("%Y-%m-%d")
+                end_str = end_date.strftime("%Y-%m-%d")
+                filtered = []
+                for r in parsed_records:
+                    raw_d = clean_val(r.get(date_field, ""))
+                    if not raw_d:
                         continue
-                    r_date = raw_date_str.replace("/", "-")[:10]
-                    if len(r_date) != 10 or not (start_str <= r_date <= end_str):
-                        continue
-                
-                if target_publisher:
-                    r_pub = str(r.get("field-8", ""))
-                    if target_publisher.lower() not in r_pub.lower():
-                        continue
-                
-                filtered_records.append(r)
-                
-            return filtered_records if (start_date or target_publisher) else parsed_records
+                    d_str = raw_d.replace("/", "-")[:10]
+                    if len(d_str) == 10 and start_str <= d_str <= end_str:
+                        filtered.append(r)
+                parsed_records = filtered
+
+            return parsed_records
         else:
-            st.error(f"❌ APIエラー (ステータスコード {response.status_code}): {response.text}")
+            st.error(f"❌ APIエラー ({response.status_code}): {response.text}")
     except Exception as e:
         st.error(f"🚨 通信例外エラー: {e}")
-    
     return []
 
 if "api_records" not in st.session_state or url_order_no:
@@ -653,852 +367,234 @@ if "api_records" not in st.session_state or url_order_no:
     else:
         default_start = date.today()
         default_end = default_start + timedelta(days=14)
-        st.session_state["api_records"] = fetch_pocket_records(start_date=default_start, end_date=default_end, date_field="field-1")
+        st.session_state["api_records"] = fetch_pocket_records(start_date=default_start, end_date=default_end, date_field="field-52")
 
 # ==========================================
-# 6. タブ構成の定義
+# 6. メイン画面（納品書作成システム）
 # ==========================================
-tab1, tab_accessory, tab2, tab3 = st.tabs([
-    "📋 タブ1: 受注一覧表", 
-    "🏷️ 付物明細（表・カバー・帯・カード）",
-    "📦 タブ2: 納品書発行", 
-    "📄 タブ3: 請求書発行（口座指定可）"
-])
+st.header("📦 納品書作成システム")
 
-# ==========================================
-# タブ1：受注一覧表 ＆ 工程日・納品・請求明細エディタ
-# ==========================================
-with tab1:
-    st.header("📋 受注一覧表 ＆ 工程・納品・請求管理")
+with st.expander("🔍 検索条件の設定はこちら", expanded=bool(not url_order_no)):
+    search_date_type = st.radio("📅 期間検索の基準を選択", ["納期（field-52）", "受注日（field-1）"], horizontal=True)
+    target_date_field = "field-52" if "納期" in search_date_type else "field-1"
+
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        t1_start = st.date_input("期間（開始）", value=date.today(), key="deliv_s")
+    with col_s2:
+        t1_end = st.date_input("期間（終了）", value=date.today() + timedelta(days=14), key="deliv_e")
     
-    if url_order_no:
-        st.success(f"🔗 DBから受注番号 **{url_order_no}** のデータを起動しました！")
-    
-    with st.expander("🔍 検索条件の変更・絞り込みはこちら", expanded=bool(not url_order_no)):
-        search_date_type = st.radio("📅 期間検索の基準を選択", ["受注日（field-1）", "納期（field-52）"], horizontal=True)
-        target_date_field = "field-1" if "受注日" in search_date_type else "field-52"
+    publisher_input = st.text_input("📖 得意先名（出版社名）で絞り込み", value="", key="deliv_pub")
+    search_clicked = st.button("🔄 検索実行", type="primary", key="deliv_btn")
 
-        col_s1, col_s2 = st.columns(2)
-        with col_s1:
-            default_start = date.today()
-            default_end = default_start + timedelta(days=14)
-            t1_start = st.date_input("期間（開始）", value=default_start, key="t1_s")
-        with col_s2:
-            t1_end = st.date_input("期間（終了）", value=default_end, key="t1_e")
-        
-        publisher_input = st.text_input("📖 出版社名で絞り込み（空欄なら期間内すべて）", value="", key="pub_ord")
-        
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            search_clicked = st.button("🔄 指定期間 ＆ 出版社名で検索", type="primary", key="btn_s1")
-        
-        st.markdown("---")
-        direct_order_input = st.text_input("🏷️ 受注番号で直接検索（1件指定）", value=url_order_no if url_order_no else "", key="direct_ord")
-        direct_search_clicked = st.button("🔍 受注番号で検索実行", key="btn_direct_s")
-
-    if search_clicked:
-        st.query_params.clear()
-        with st.spinner("@ポケットからデータを取得中..."):
-            st.session_state["api_records"] = fetch_pocket_records(
-                start_date=t1_start, 
-                end_date=t1_end, 
-                target_publisher=publisher_input if publisher_input else None,
-                date_field=target_date_field
-            )
-        st.rerun()
-
-    if direct_search_clicked and direct_order_input:
-        st.query_params["ord"] = direct_order_input
-        with st.spinner(f"受注番号 {direct_order_input} を検索中..."):
-            st.session_state["api_records"] = fetch_pocket_records(target_order_no=direct_order_input)
-        st.rerun()
-
-    api_records = st.session_state.get("api_records", None)
-    
-    if api_records is not None:
-        if api_records:
-            st.success(f"✨ 対象レコード **{len(api_records)} 件** を取得しました。")
-            
-            if "df_flat_session" not in st.session_state or st.session_state.get("last_len") != len(api_records):
-                flat_data = []
-                for record_idx, r in enumerate(api_records):
-                    h_ord_no = clean_val(r.get("field-2", ""))
-                    h_ord_date = parse_date_safe(r.get("field-1"))
-                    h_due = parse_date_safe(r.get("field-52"))
-                    
-                    val_102 = clean_val(r.get("field-102", ""))
-                    if val_102 not in ["", "確定", "上旬", "中旬", "下旬"]:
-                        val_102 = ""
-                    
-                    val_103 = clean_val(r.get("field-103", ""))
-                    if val_103 not in ["", "急"]:
-                        val_103 = ""
-
-                    h_total_pages = clean_val(r.get("field-82", ""))   # 総頁数 (field-82)
-                    h_cust_keeping = clean_val(r.get("field-81", ""))  # 製品預かり (field-81)
-                    h_p32 = clean_val(r.get("field-30", ""))           # 32P (field-30)
-                    h_p16 = clean_val(r.get("field-31", ""))           # 16P (field-31)
-                    h_p8 = clean_val(r.get("field-32", ""))            # 8P (field-32)
-                    h_p4 = clean_val(r.get("field-33", ""))            # 4P (field-33)
-                    h_p2 = clean_val(r.get("field-34", ""))            # 2P (field-34)
-
-                    h_pub = clean_val(r.get("field-8", ""))
-                    h_title = clean_val(r.get("field-13", ""))
-                    h_format = clean_val(r.get("field-23", ""))        # 判型
-                    h_isbn = clean_val(r.get("field-93", ""))
-                    h_qty = clean_val(r.get("field-4", ""))
-                    h_price = clean_val(r.get("field-5", ""))
-                    h_memo = clean_val(r.get("field-45", ""))          # 備考 (field-45)
-                    
-                    rec_id = clean_val(r.get("_recordId", ""))
-                    detail_url = f"{POCKET_BASE_URL}/apps/{APP_ID}/records/{rec_id}/detail" if rec_id and rec_id.lower() != "none" else ""
-                    
-                    sub_90 = r.get("field-90", [])
-                    sub_88 = r.get("field-88", [])
-                    sub_89 = r.get("field-89", [])
-                    
-                    max_len = max(len(sub_90) if isinstance(sub_90, list) else 0,
-                                    len(sub_88) if isinstance(sub_88, list) else 0,
-                                    len(sub_89) if isinstance(sub_89, list) else 0, 1)
-                    
-                    for i in range(max_len):
-                        item_90 = sub_90[i] if isinstance(sub_90, list) and len(sub_90) > i else {}
-                        rec_90 = item_90.get("record", item_90) if isinstance(item_90, dict) else {}
-                        
-                        item_88 = sub_88[i] if isinstance(sub_88, list) and len(sub_88) > i else {}
-                        rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
-                        
-                        item_89 = sub_89[i] if isinstance(sub_89, list) and len(sub_89) > i else {}
-                        rec_89 = item_89.get("record", item_89) if isinstance(item_89, dict) else {}
-                        
-                        val_88_13 = clean_val(rec_88.get("field-88_13", ""))
-                        if val_88_13 != "在庫から":
-                            val_88_13 = ""
-
-                        val_88_10 = clean_val(rec_88.get("field-88_10", ""))
-
-                        h_printer = clean_val(r.get("field-14", ""))  # 印刷所 (field-14)
-                        h_folding = clean_val(r.get("field-16", ""))  # 折 (field-16)
-
-                        flat_data.append({
-                            "更新": False,
-                            "_record_idx": record_idx,
-                            "_sub_idx": i,
-                            "詳細": detail_url,
-                            "受注番号": h_ord_no,
-                            "受注日": h_ord_date,
-                            "納期": h_due,
-                            "納期上/中/下": val_102,
-                            "急ぎ": val_103,
-                            "出版社名": h_pub,
-                            "書名": h_title,
-                            "ISBN": h_isbn,
-                            "判型": h_format,
-                            "総頁数": h_total_pages,
-                            "製本数": h_qty,
-                            "製品預かり": h_cust_keeping,
-                            "32P": h_p32,
-                            "16P": h_p16,
-                            "8P": h_p8,
-                            "4P": h_p4,
-                            "2P": h_p2,
-                            "単価": h_price,
-                            "印刷所": h_printer,
-                            "折": h_folding,
-                            "折本日": parse_date_safe(rec_90.get("field-90_3")),
-                            "無線日": parse_date_safe(rec_90.get("field-90_4")),
-                            "三方日": parse_date_safe(rec_90.get("field-90_5")),
-                            "仕上日": parse_date_safe(rec_90.get("field-90_6")),
-                            "見本納入日": parse_date_safe(rec_90.get("field-90_1")),
-                            "入品日": parse_date_safe(rec_90.get("field-90_10")),
-                            "備考": h_memo,
-                            "納品日": parse_date_safe(rec_88.get("field-88_2")),
-                            "納品数": clean_val(rec_88.get("field-88_4", "")),
-                            "PL数": clean_val(rec_88.get("field-88_7", "")),
-                            "見本数量": clean_val(rec_88.get("field-88_8", "")),
-                            "在庫出荷": val_88_13,
-                            "配車区分": val_88_10,
-                            "納品": False,
-                            "売上日": parse_date_safe(rec_89.get("field-89_1")),
-                            "請求数量": clean_val(rec_89.get("field-89_3", "")),
-                            "請求単価": clean_val(rec_89.get("field-89_4", "")),
-                            "内見本数量": clean_val(rec_89.get("field-89_12", "")),
-                            "備考_請求": clean_val(rec_89.get("field-89_7", "")),
-                            "請求": False
-                        })
-                
-                df_temp = pd.DataFrame(flat_data)
-                
-                # 画面・エクセル・PDF共通の列順（書名の前に出版社名）
-                screen_columns = [
-                    "更新", "_record_idx", "_sub_idx", "詳細", "受注番号", "受注日", "納期", "納期上/中/下", "急ぎ",
-                    "出版社名", "書名", "ISBN", "判型", "総頁数", "製本数", "製品預かり", "32P", "16P", "8P", "4P", "2P", "単価",
-                    "印刷所", "折", "折本日", "無線日", "三方日", "仕上日", "見本納入日", "入品日", "備考",
-                    "納品日", "納品数", "PL数", "見本数量", "在庫出荷", "配車区分", "納品", "売上日", "請求数量", "請求単価", "内見本数量", "備考_請求", "請求"
-                ]
-                df_temp = df_temp[[col for col in screen_columns if col in df_temp.columns]]
-
-                sort_keys = ["出版社名", "判型", "納期"]
-                sort_ascending = [True, True, True]
-                available_sort_keys = [k for k in sort_keys if k in df_temp.columns]
-                if available_sort_keys:
-                    df_temp = df_temp.sort_values(
-                        by=available_sort_keys, 
-                        ascending=sort_ascending[:len(available_sort_keys)], 
-                        na_position="last"
-                    ).reset_index(drop=True)
-                
-                st.session_state["df_flat_session"] = df_temp
-                st.session_state["last_len"] = len(api_records)
-
-            st.markdown("##### ⚡ 一括チェック操作 ＆ 保存")
-            col_b1, col_b2, col_b3, col_b4, col_b5 = st.columns([1, 1, 1, 1, 1.3])
-            with col_b1:
-                if st.button("☑️ 更新 全選択", key="all_update_on"):
-                    st.session_state["df_flat_session"]["更新"] = True
-                    st.rerun()
-            with col_b2:
-                if st.button("ロ 更新 全解除", key="all_update_off"):
-                    st.session_state["df_flat_session"]["更新"] = False
-                    st.rerun()
-            with col_b3:
-                if st.button("☑️ 請求 全選択", key="all_invoice_on"):
-                    st.session_state["df_flat_session"]["請求"] = True
-                    st.rerun()
-            with col_b4:
-                if st.button("ロ 請求 全解除", key="all_invoice_off"):
-                    st.session_state["df_flat_session"]["請求"] = False
-                    st.rerun()
-            with col_b5:
-                top_save_clicked = st.button("💾 上書き保存", type="primary", key="btn_save_top")
-
-            edited_flat_df = st.data_editor(
-                st.session_state["df_flat_session"],
-                num_rows="fixed",
-                key="grid_flat_main",
-                use_container_width=True,
-                column_config={
-                    "更新": st.column_config.CheckboxColumn("更新チェック", required=True, help="チェックを入れた行のデータを@pocketに上書き保存します"),
-                    "_record_idx": None,
-                    "_sub_idx": None,
-                    "詳細": st.column_config.LinkColumn(
-                        "🔗 @pocket詳細",
-                        help="@pocketの該当データ画面へジャンプします",
-                        display_text="📝 詳細を開く"
-                    ),
-                    "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
-                    "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD", disabled=True),
-                    "納期": st.column_config.DateColumn("納期", format="YYYY-MM-DD", disabled=True),
-                    "納期上/中/下": st.column_config.SelectboxColumn(
-                        "納期上/中/下",
-                        options=["", "確定", "上旬", "中旬", "下旬"],
-                        help="納期の上旬・中旬・下旬・確定を選択します (field-102)"
-                    ),
-                    "急ぎ": st.column_config.SelectboxColumn(
-                        "急ぎ",
-                        options=["", "急"],
-                        help="急ぎ案件の場合は「急」を選択します (field-103)"
-                    ),
-                    "出版社名": st.column_config.TextColumn("出版社名", disabled=True),
-                    "書名": st.column_config.TextColumn("書名", disabled=True),
-                    "ISBN": st.column_config.TextColumn("ISBN", disabled=True, help="ISBN番号 (field-93)"),
-                    "判型": st.column_config.TextColumn("判型", disabled=True, help="判型 (field-23)"),
-                    "総頁数": st.column_config.TextColumn("総頁数", disabled=True, help="総頁数 (field-82)"),
-                    "製本数": st.column_config.TextColumn("製本数", disabled=True),
-                    "製品預かり": st.column_config.TextColumn("製品預かり", disabled=True, help="製品預かり (field-81)"),
-                    "32P": st.column_config.TextColumn("32P", disabled=True, help="32P (field-30)"),
-                    "16P": st.column_config.TextColumn("16P", disabled=True, help="16P (field-31)"),
-                    "8P": st.column_config.TextColumn("8P", disabled=True, help="8P (field-32)"),
-                    "4P": st.column_config.TextColumn("4P", disabled=True, help="4P (field-33)"),
-                    "2P": st.column_config.TextColumn("2P", disabled=True, help="2P (field-34)"),
-                    "単価": st.column_config.TextColumn("単価", disabled=True),
-                    "印刷所": st.column_config.TextColumn("印刷所", disabled=True, help="印刷所 (field-14)"),
-                    "折": st.column_config.TextColumn("折", disabled=True, help="折 (field-16)"),
-                    "折本日": st.column_config.DateColumn("折本日", format="YYYY-MM-DD"),
-                    "無線日": st.column_config.DateColumn("無線日", format="YYYY-MM-DD"),
-                    "三方日": st.column_config.DateColumn("三方日", format="YYYY-MM-DD"),
-                    "仕上日": st.column_config.DateColumn("仕上日", format="YYYY-MM-DD"),
-                    "見本納入日": st.column_config.DateColumn("見本納入日", format="YYYY-MM-DD", help="見本納入日（field-90_1）"),
-                    "入品日": st.column_config.DateColumn("入品日", format="YYYY-MM-DD", help="入品日（field-90_10）"),
-                    "備考": st.column_config.TextColumn("備考", help="備考 (field-45)"),
-                    "納品日": st.column_config.DateColumn("納品日", format="YYYY-MM-DD", help="納品日（field-88_2）"),
-                    "納品数": st.column_config.TextColumn("納品数", help="納品数（field-88_4）"),
-                    "PL数": st.column_config.TextColumn("PL数", help="PL数（field-88_7）"),
-                    "見本数量": st.column_config.TextColumn("見本数量", help="見本数量（field-88_8）"),
-                    "在庫出荷": st.column_config.SelectboxColumn(
-                        "在庫出荷",
-                        options=["", "在庫から"],
-                        help="「空欄」または「在庫から」を選択します（field-88_13）",
-                        required=False
-                    ),
-                    "配車区分": st.column_config.TextColumn("配車区分", help="配車区分を入力します（field-88_10）"),
-                    "納品": st.column_config.CheckboxColumn("納品", help="チェックすると納品書発行の対象になります"),
-                    "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD"),
-                    "請求数量": st.column_config.TextColumn("請求数量", help="請求数量（field-89_3）"),
-                    "請求単価": st.column_config.TextColumn("請求単価", help="請求単価（field-89_4）"),
-                    "内見本数量": st.column_config.TextColumn("内見本数量", help="内見本数量（field-89_12）"),
-                    "備考_請求": st.column_config.TextColumn("備考（請求）"),
-                    "請求": st.column_config.CheckboxColumn("請求", help="チェックすると請求書発行の対象になります"),
-                }
-            )
-            
-            st.session_state["df_flat_session"] = edited_flat_df
-
-            st.markdown("---")
-            st.markdown("##### 🖨️ 受注一覧表 出力設定（グループ軸の選択）")
-            order_group_choice = st.radio(
-                "受注一覧表のグループ軸を選択してください",
-                options=["① 顧客グループ別（出版社順・用紙溢れで改ページ）", "② 判型グループ別（判型順）"],
-                horizontal=True,
-                key="ord_group_choice"
-            )
-            ord_group_type = "publisher" if "①" in order_group_choice else "format"
-
-            col_dl1, col_dl2 = st.columns(2)
-            with col_dl1:
-                excel_target_cols = [
-                    "受注番号", "受注日", "納期", "納期上/中/下", "急ぎ",
-                    "出版社名", "書名", "ISBN", "判型", "総頁数", "製本数", "製品預かり", "32P", "16P", "8P", "4P", "2P",
-                    "印刷所", "折", "折本日", "無線日", "三方日", "仕上日", "見本納入日", "入品日", "備考"
-                ]
-                df_excel_export = edited_flat_df[[c for c in excel_target_cols if c in edited_flat_df.columns]]
-                excel_bytes_ord = to_excel_bytes(df_excel_export)
-                st.download_button(
-                    label="📥 受注一覧表を Excel でダウンロード",
-                    data=excel_bytes_ord,
-                    file_name=f"受注一覧表_{date.today().strftime('%Y%m%d')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="dl_excel_order"
-                )
-            with col_dl2:
-                pdf_bytes_ord = generate_order_pdf(edited_flat_df, group_type=ord_group_type)
-                st.download_button(
-                    label=f"🖨️ 受注一覧表を A3 PDF でダウンロード（{order_group_choice}）",
-                    data=pdf_bytes_ord,
-                    file_name=f"受注一覧表_{ord_group_type}_{date.today().strftime('%Y%m%d')}.pdf",
-                    mime="application/pdf",
-                    key="dl_pdf_order"
-                )
-
-            selected_rows = edited_flat_df[edited_flat_df["更新"] == True]
-            if not selected_rows.empty and "_record_idx" in selected_rows.columns:
-                target_record_idx = int(selected_rows.iloc[0]["_record_idx"])
-                sample_rec = api_records[target_record_idx] if target_record_idx < len(api_records) else {}
-                field_2 = clean_val(selected_rows.iloc[0].get("受注番号", ""))
-                field_1 = clean_val(selected_rows.iloc[0].get("受注日", ""))
-                field_8 = clean_val(selected_rows.iloc[0].get("出版社名", ""))
-                field_13 = clean_val(selected_rows.iloc[0].get("書名", ""))
-                field_4 = clean_val(selected_rows.iloc[0].get("製本数", ""))
-                field_5 = clean_val(selected_rows.iloc[0].get("単価", ""))
-            else:
-                sample_rec = api_records[0] if api_records else {}
-                field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
-            
-            st.info(f"📌 現在選択中のレコード: **受注番号 {field_2} ({field_13})** （納品書・請求書発行に連動しています）")
-                
-        else:
-            st.warning("⚠️ 該当するレコードが見つかりませんでした。")
-            sample_rec = {}
-            top_save_clicked = False
-            field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
-    else:
-        st.info("ℹ️ 検索条件を指定するか、DBから受注番号を指定してアクセスしてください。")
-        sample_rec = {}
-        top_save_clicked = False
-        field_2, field_1, field_8, field_13, field_4, field_5 = "", "", "", "", "", ""
-
-# ==========================================
-# タブ1.5：付物明細（表、カバー、帯、カード）
-# ==========================================
-with tab_accessory:
-    st.header("🏷️ 付物明細（表・カバー・帯・カード）管理")
-    st.info("💡 各種付物の『日付』は変更・更新が可能ですが、『印刷所』は参照専用（更新不可）となります。")
-
-    if api_records and len(api_records) > 0:
-        acc_flat_data = []
-        for record_idx, r in enumerate(api_records):
-            h_ord_no = clean_val(r.get("field-2", ""))
-            h_ord_date = parse_date_safe(r.get("field-1"))
-            h_due = parse_date_safe(r.get("field-52"))
-            h_pub = clean_val(r.get("field-8", ""))
-            h_title = clean_val(r.get("field-13", ""))
-            h_format = clean_val(r.get("field-23", ""))
-            
-            rec_id = clean_val(r.get("_recordId", ""))
-            detail_url = f"{POCKET_BASE_URL}/apps/{APP_ID}/records/{rec_id}/detail" if rec_id and rec_id.lower() != "none" else ""
-            
-            sub_91 = r.get("field-91", [])
-            max_len_91 = len(sub_91) if isinstance(sub_91, list) and len(sub_91) > 0 else 1
-            
-            for i in range(max_len_91):
-                item_91 = sub_91[i] if isinstance(sub_91, list) and len(sub_91) > i else {}
-                rec_91 = item_91.get("record", item_91) if isinstance(item_91, dict) else {}
-                
-                acc_flat_data.append({
-                    "更新": False,
-                    "_record_idx": record_idx,
-                    "_sub_idx": i,
-                    "詳細": detail_url,
-                    "受注番号": h_ord_no,
-                    "受注日": h_ord_date,
-                    "納期": h_due,
-                    "出版社名": h_pub,
-                    "書名": h_title,
-                    "判型": h_format,
-                    "表 日付": parse_date_safe(rec_91.get("field-91_1")),
-                    "表 印刷所": clean_val(rec_91.get("field-91_2", "")),
-                    "カバー 日付": parse_date_safe(rec_91.get("field-91_5")),
-                    "カバー 印刷所": clean_val(rec_91.get("field-91_6", "")),
-                    "カード 日付": parse_date_safe(rec_91.get("field-91_9")),
-                    "カード 印刷所": clean_val(rec_91.get("field-91_10", "")),
-                    "帯 日付": parse_date_safe(rec_91.get("field-91_13")),
-                    "帯 印刷所": clean_val(rec_91.get("field-91_14", ""))
-                })
-        
-        df_acc = pd.DataFrame(acc_flat_data)
-        # 付物明細の列順（書名の前に出版社名）
-        acc_screen_cols = ["更新", "_record_idx", "_sub_idx", "詳細", "受注番号", "受注日", "納期", "出版社名", "書名", "判型", "表 日付", "表 印刷所", "カバー 日付", "カバー 印刷所", "カード 日付", "カード 印刷所", "帯 日付", "帯 印刷所"]
-        df_acc = df_acc[[c for c in acc_screen_cols if c in df_acc.columns]]
-
-        if "納期" in df_acc.columns:
-            df_acc = df_acc.sort_values(by="納期", ascending=True, na_position="last").reset_index(drop=True)
-        
-        edited_acc_df = st.data_editor(
-            df_acc,
-            num_rows="fixed",
-            key="grid_accessory_main",
-            use_container_width=True,
-            column_config={
-                "更新": st.column_config.CheckboxColumn("更新チェック", required=True, help="チェックを入れた行の付物データを@pocketに上書き保存します"),
-                "_record_idx": None,
-                "_sub_idx": None,
-                "詳細": st.column_config.LinkColumn(
-                    "🔗 @pocket詳細",
-                    help="@pocketの該当データ画面へジャンプします",
-                    display_text="📝 詳細を開く"
-                ),
-                "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
-                "受注日": st.column_config.DateColumn("受注日", format="YYYY-MM-DD", disabled=True),
-                "納期": st.column_config.DateColumn("納期", format="YYYY-MM-DD", disabled=True),
-                "出版社名": st.column_config.TextColumn("出版社名", disabled=True),
-                "書名": st.column_config.TextColumn("書名", disabled=True),
-                "判型": st.column_config.TextColumn("判型", disabled=True),
-                "表 日付": st.column_config.DateColumn("表 日付", format="YYYY-MM-DD"),
-                "表 印刷所": st.column_config.TextColumn("表 印刷所", disabled=True),
-                "カバー 日付": st.column_config.DateColumn("カバー 日付", format="YYYY-MM-DD"),
-                "カバー 印刷所": st.column_config.TextColumn("カバー 印刷所", disabled=True),
-                "カード 日付": st.column_config.DateColumn("カード 日付", format="YYYY-MM-DD"),
-                "カード 印刷所": st.column_config.TextColumn("カード 印刷所", disabled=True),
-                "帯 日付": st.column_config.DateColumn("帯 日付", format="YYYY-MM-DD"),
-                "帯 印刷所": st.column_config.TextColumn("帯 印刷所", disabled=True),
-            }
+if search_clicked:
+    st.query_params.clear()
+    with st.spinner("@ポケットからデータを取得中..."):
+        st.session_state["api_records"] = fetch_pocket_records(
+            start_date=t1_start, 
+            end_date=t1_end, 
+            target_publisher=publisher_input if publisher_input else None,
+            date_field=target_date_field
         )
+    st.rerun()
 
-        st.markdown("---")
-        st.markdown("##### 🖨️ 付物明細 出力設定（グループ軸の選択）")
-        acc_group_choice = st.radio(
-            "付物明細のグループ軸を選択してください",
-            options=["① 顧客グループ別（出版社順）", "② 判型グループ別（判型順）"],
-            horizontal=True,
-            key="acc_group_choice"
-        )
-        acc_group_type = "publisher" if "①" in acc_group_choice else "format"
+api_records = st.session_state.get("api_records", None)
 
-        col_dl3, col_dl4 = st.columns(2)
-        with col_dl3:
-            excel_bytes_acc = to_excel_bytes(edited_acc_df)
-            st.download_button(
-                label="📥 付物明細一覧表を Excel でダウンロード",
-                data=excel_bytes_acc,
-                file_name=f"付物明細一覧表_{date.today().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="dl_excel_acc"
-            )
-        with col_dl4:
-            pdf_bytes_acc = generate_accessory_pdf(edited_acc_df, group_type=acc_group_type)
-            st.download_button(
-                label=f"🖨️ 付物明細一覧表を PDF でダウンロード（{acc_group_choice}）",
-                data=pdf_bytes_acc,
-                file_name=f"付物明細一覧表_{acc_group_type}_{date.today().strftime('%Y%m%d')}.pdf",
-                mime="application/pdf",
-                key="dl_pdf_acc"
-            )
-
-    else:
-        st.warning("⚠️ 表示対象の受注データがありません。タブ1で検索を行ってください。")
-
-# ==========================================
-# 共通の上書き保存処理
-# ==========================================
-st.divider()
-
-bottom_save_clicked = st.button("💾 チェックを入れたデータを データベース に一括上書き保存する", type="primary", key="btn_save_checked_all")
-
-if top_save_clicked or bottom_save_clicked:
-    checked_rows = pd.DataFrame()
-    source_tab = None
+if api_records:
+    st.success(f"✨ 対象レコード **{len(api_records)} 件** を取得しました。")
     
-    if 'edited_flat_df' in locals() and not edited_flat_df[edited_flat_df["更新"] == True].empty:
-        checked_rows = edited_flat_df[edited_flat_df["更新"] == True]
-        source_tab = "flat"
-    elif 'edited_acc_df' in locals() and not edited_acc_df[edited_acc_df["更新"] == True].empty:
-        checked_rows = edited_acc_df[edited_acc_df["更新"] == True]
-        source_tab = "acc"
+    flat_data = []
+    for record_idx, r in enumerate(api_records):
+        rec_id = r.get("_recordId", "")
+        detail_url = f"{POCKET_BASE_URL}/apps/{APP_ID}/records/{rec_id}/detail" if rec_id and rec_id.lower() != "none" else ""
+
+        h_ord_no = clean_val(r.get("field-2", ""))
+        h_pub = clean_val(r.get("field-8", ""))       # 得意先名
+        h_title = clean_val(r.get("field-13", ""))
+        h_price = clean_val(r.get("field-20", ""))      # 定価 (field-20)
+        h_format = clean_val(r.get("field-23", ""))     # 判型
+        h_print_count = clean_val(r.get("field-28", "")) # 刷数 (field-28)
+        h_stamp = clean_val(r.get("field-4", ""))       # 印 (field-4)
+        h_cust_keeping = clean_val(r.get("field-81", "")) # 製品預かり (field-81)
         
-    if checked_rows.empty:
-        st.warning("⚠️ 上書き保存する行の「更新チェック」ボックスにチェックを入れてください。")
-    else:
-        headers = {
-            "X-At-Pocket-API-Key": POCKET_API_KEY, 
-            "Accept": "application/json", 
-            "Content-Type": "application/json"
+        sub_88 = r.get("field-88", [])                  # 納品サブテーブル
+        item_88 = sub_88[0] if isinstance(sub_88, list) and len(sub_88) > 0 else {}
+        rec_88 = item_88.get("record", item_88) if isinstance(item_88, dict) else {}
+        sub_88_id = str(item_88.get("Id") or item_88.get("recordId") or rec_88.get("Id") or "").strip()
+
+        # 預より納品 (field-88_13) のデフォルト値を「在庫から」に設定
+        val_88_13 = clean_val(rec_88.get("field-88_13", ""))
+        if not val_88_13:
+            val_88_13 = "在庫から"
+
+        flat_data.append({
+            "更新": False,
+            "詳細": detail_url,
+            "受注番号": h_ord_no,
+            "書名": h_title,
+            "定価": h_price,
+            "判型": h_format,
+            "刷数": h_print_count,
+            "部数": clean_val(rec_88.get("field-88_4", "")),
+            "印": h_stamp,
+            "製品預かり": h_cust_keeping,
+            "預より納品": val_88_13,
+            "パレット数": clean_val(rec_88.get("field-88_7", "")),
+            "配本日": parse_date_safe(rec_88.get("field-88_2")),
+            "見本": clean_val(rec_88.get("field-88_8", "")),
+            "備考": clean_val(rec_88.get("field-88_5", "")),
+            "納品": False,
+            "配送振分": clean_val(rec_88.get("field-88_10", "")),
+            "_record_idx": record_idx,
+            "_recordId": rec_id,
+            "_sub_88_id": sub_88_id,
+            "得意先名": h_pub
+        })
+
+    df_deliv = pd.DataFrame(flat_data)
+
+    # 画面表示項目構成の順序に並び替え
+    display_cols = [
+        "更新", "詳細", "受注番号", "書名", "定価", "判型", "刷数", 
+        "部数", "印", "製品預かり", "預より納品", "パレット数", "配本日", "見本", "備考", "納品", "配送振分"
+    ]
+    df_deliv_display = df_deliv[[c for c in display_cols if c in df_deliv.columns]]
+
+    edited_deliv_df = st.data_editor(
+        df_deliv_display,
+        num_rows="fixed",
+        key="grid_delivery_sys",
+        use_container_width=True,
+        column_config={
+            "更新": st.column_config.CheckboxColumn("更新", required=True, help="チェックを入れた行を@pocketに保存します"),
+            "詳細": st.column_config.LinkColumn("🔗詳細", help="@pocket詳細画面を開く", display_text="📝開く"),
+            "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
+            "書名": st.column_config.TextColumn("書名", disabled=True),
+            "定価": st.column_config.TextColumn("定価", disabled=True),
+            "判型": st.column_config.TextColumn("判型", disabled=True),
+            "刷数": st.column_config.TextColumn("刷数", disabled=True),
+            "部数": st.column_config.TextColumn("部数", help="納品数（field-88_4）"),
+            "印": st.column_config.TextColumn("印", disabled=True, help="印（field-4）"),
+            "製品預かり": st.column_config.TextColumn("製品預かり", disabled=True, help="製品預かり（field-81）"),
+            "預より納品": st.column_config.SelectboxColumn(
+                "預より納品",
+                options=["", "在庫から"],
+                help="預より納品区分（field-88_13）"
+            ),
+            "パレット数": st.column_config.TextColumn("パレット数", help="PL数（field-88_7）"),
+            "配本日": st.column_config.DateColumn("配本日", format="YYYY-MM-DD", help="納品日（field-88_2）"),
+            "見本": st.column_config.TextColumn("見本", help="見本数量（field-88_8）"),
+            "備考": st.column_config.TextColumn("備考", help="備考・納品書（field-88_5）"),
+            "納品": st.column_config.CheckboxColumn("納品", help="チェックすると納品書出力の対象になります"),
+            "配送振分": st.column_config.TextColumn("配送振分", help="配車区分（field-88_10）")
         }
-        success_count = 0
-        fail_count = 0
-        
-        grouped_records = checked_rows.groupby("_record_idx")
-        
-        import copy
-        for r_idx, group_df in grouped_records:
-            r_idx = int(r_idx)
-            original_rec = api_records[r_idx]
-            record_id = original_rec.get("_recordId")
-            
-            if not record_id:
-                st.error("❌ レコードIDが見つかりませんでした。")
-                fail_count += 1
-                continue
-            
-            update_url = f"{POCKET_BASE_URL}/api/apps/{APP_ID}/records/{record_id}"
-            
-            record_payload = {
-                "field-2": clean_val(original_rec.get("field-2", "")),
-                "field-1": clean_val(original_rec.get("field-1", "")),
-                "field-4": clean_val(original_rec.get("field-4", "")),
-                "field-5": clean_val(original_rec.get("field-5", "")),
-            }
-            
-            if source_tab == "flat" and not group_df.empty:
-                first_row = group_df.iloc[0]
-                record_payload["field-102"] = clean_val(first_row.get("納期上/中/下", ""))
-                record_payload["field-103"] = clean_val(first_row.get("急ぎ", ""))
-                record_payload["field-45"] = clean_val(first_row.get("備考", ""))
-            else:
-                record_payload["field-102"] = clean_val(original_rec.get("field-102", ""))
-                record_payload["field-103"] = clean_val(original_rec.get("field-103", ""))
-                record_payload["field-45"] = clean_val(original_rec.get("field-45", ""))
-            
-            # --- 1. field-90 (工程日等) の更新 ---
-            orig_sub_90 = original_rec.get("field-90", [])
-            sub90_list = copy.deepcopy(orig_sub_90)
-            if source_tab == "flat":
-                def date_to_str(val):
-                    if pd.isna(val) or not val:
-                        return ""
-                    if isinstance(val, (date, datetime)):
-                        return val.strftime("%Y-%m-%d")
-                    parsed = parse_date_safe(val)
-                    return parsed.strftime("%Y-%m-%d") if parsed else ""
+    )
 
-                for _, row in group_df.iterrows():
-                    s_idx = int(row.get("_sub_idx", 0))
-                    while len(sub90_list) <= s_idx:
-                        sub90_list.append({"record": {}})
-                    
-                    rec_dict = sub90_list[s_idx].get("record", {})
-                    rec_dict["field-90_3"] = date_to_str(row["折本日"])
-                    rec_dict["field-90_4"] = date_to_str(row["無線日"])
-                    rec_dict["field-90_5"] = date_to_str(row["三方日"])
-                    rec_dict["field-90_6"] = date_to_str(row["仕上日"])
-                    rec_dict["field-90_1"] = date_to_str(row["見本納入日"])
-                    rec_dict["field-90_10"] = date_to_str(row["入品日"])
-                    sub90_list[s_idx]["record"] = rec_dict
-                    
-                record_payload["field-90"] = sub90_list
-            else:
-                record_payload["field-90"] = orig_sub_90
-
-            # --- 2. field-88 (納品データ) の更新 ---
-            orig_sub_88 = original_rec.get("field-88", [])
-            sub88_list = copy.deepcopy(orig_sub_88)
-            if source_tab == "flat":
-                for _, row in group_df.iterrows():
-                    s_idx = int(row.get("_sub_idx", 0))
-                    while len(sub88_list) <= s_idx:
-                        sub88_list.append({"record": {}})
-                    
-                    deliv_date_str = ""
-                    deliv_date_val = row["納品日"]
-                    if pd.notna(deliv_date_val):
-                        if isinstance(deliv_date_val, (date, datetime)):
-                            deliv_date_str = deliv_date_val.strftime("%Y-%m-%d")
-                        else:
-                            parsed_d = parse_date_safe(deliv_date_val)
-                            if parsed_d:
-                                deliv_date_str = parsed_d.strftime("%Y-%m-%d")
-
-                    rec_dict_88 = sub88_list[s_idx].get("record", {})
-                    rec_dict_88["field-88_2"] = deliv_date_str
-                    rec_dict_88["field-88_4"] = clean_val(row["納品数"]) or "0"
-                    rec_dict_88["field-88_7"] = clean_val(row["PL数"]) or "0"
-                    rec_dict_88["field-88_8"] = clean_val(row["見本数量"]) or "0"
-                    rec_dict_88["field-88_13"] = clean_val(row["在庫出荷"])
-                    rec_dict_88["field-88_10"] = clean_val(row["配車区分"])
-                    sub88_list[s_idx]["record"] = rec_dict_88
-                    
-                record_payload["field-88"] = sub88_list
-            else:
-                record_payload["field-88"] = orig_sub_88
-
-            # --- 3. field-89 (請求データ) の更新 ---
-            orig_sub_89 = original_rec.get("field-89", [])
-            sub89_list = copy.deepcopy(orig_sub_89)
-            if source_tab == "flat":
-                for _, row in group_df.iterrows():
-                    s_idx = int(row.get("_sub_idx", 0))
-                    while len(sub89_list) <= s_idx:
-                        sub89_list.append({"record": {}})
-                    
-                    sale_date_str = ""
-                    sale_date_val = row["売上日"]
-                    if pd.notna(sale_date_val):
-                        if isinstance(sale_date_val, (date, datetime)):
-                            sale_date_str = sale_date_val.strftime("%Y-%m-%d")
-                        else:
-                            parsed_s = parse_date_safe(sale_date_val)
-                            if parsed_s:
-                                sale_date_str = parsed_s.strftime("%Y-%m-%d")
-
-                    rec_dict_89 = sub89_list[s_idx].get("record", {})
-                    rec_dict_89["field-89_1"] = sale_date_str
-                    rec_dict_89["field-89_3"] = clean_val(row["請求数量"]) or "0"
-                    rec_dict_89["field-89_4"] = clean_val(row["請求単価"]) or "0"
-                    rec_dict_89["field-89_12"] = clean_val(row["内見本数量"]) or "0"
-                    rec_dict_89["field-89_7"] = clean_val(row["備考_請求"])
-                    for k in ["field-89_5", "field-89_6"]:
-                        rec_dict_89.pop(k, None)
-                    sub89_list[s_idx]["record"] = rec_dict_89
-                    
-                record_payload["field-89"] = sub89_list
-            else:
-                cleaned_sub89 = []
-                for item in orig_sub_89:
-                    item_cp = copy.deepcopy(item)
-                    rec = item_cp.get("record", item_cp)
-                    if isinstance(rec, dict):
-                        for k in ["field-89_5", "field-89_6"]:
-                            rec.pop(k, None)
-                    cleaned_sub89.append(item_cp)
-                record_payload["field-89"] = cleaned_sub89
-
-            # --- 4. field-91 (付物データ) の更新 ---
-            orig_sub_91 = original_rec.get("field-91", [])
-            sub91_list = copy.deepcopy(orig_sub_91)
-            if source_tab == "acc":
-                for _, row in group_df.iterrows():
-                    s_idx = int(row.get("_sub_idx", 0))
-                    while len(sub91_list) <= s_idx:
-                        sub91_list.append({"record": {}})
-                    
-                    rec_dict_91 = sub91_list[s_idx].get("record", {})
-                    rec_dict_91["field-91_1"] = clean_val(row["表 日付"])
-                    rec_dict_91["field-91_5"] = clean_val(row["カバー 日付"])
-                    rec_dict_91["field-91_9"] = clean_val(row["カード 日付"])
-                    rec_dict_91["field-91_13"] = clean_val(row["帯 日付"])
-                    for k in ["field-91_2", "field-91_6", "field-91_10", "field-91_14"]:
-                        rec_dict_91.pop(k, None)
-                    sub91_list[s_idx]["record"] = rec_dict_91
-                    
-                record_payload["field-91"] = sub91_list
-            else:
-                cleaned_sub91 = []
-                for item in orig_sub_91:
-                    item_cp = copy.deepcopy(item)
-                    rec = item_cp.get("record", item_cp)
-                    if isinstance(rec, dict):
-                        for k in ["field-91_2", "field-91_6", "field-91_10", "field-91_14"]:
-                            rec.pop(k, None)
-                    cleaned_sub91.append(item_cp)
-                record_payload["field-91"] = cleaned_sub91
-
-            payload = {
-                "apiVersion": 1.1,
-                "record": record_payload
-            }
-
-            try:
-                res = requests.put(update_url, headers=headers, json=payload, timeout=15)
-                if res.status_code in [200, 204]:
-                    success_count += 1
-                else:
-                    st.error(f"❌ レコードID {record_id} の保存失敗 (ステータス {res.status_code}): {res.text}")
-                    fail_count += 1
-            except Exception as e:
-                st.error(f"🚨 例外発生: {e}")
-                fail_count += 1
-        
-        if success_count > 0:
-            st.success(f"✅ **{success_count} 件** のデータをデータベースに正常に一括上書き保存しました！")
-            if url_order_no:
-                st.session_state["api_records"] = fetch_pocket_records(target_order_no=url_order_no)
-            else:
-                default_start = date.today()
-                default_end = default_start + timedelta(days=14)
-                st.session_state["api_records"] = fetch_pocket_records(start_date=default_start, end_date=default_end, date_field="field-1")
-            st.rerun()
-            
-        if fail_count > 0:
-            st.error(f"❌ {fail_count} 件の保存に失敗しました。")
-
-# ==========================================
-# タブ2：納品書発行
-# ==========================================
-with tab2:
-    st.header("📦 納品書発行")
-    st.info("💡 タブ1の明細行で**「納品」**にチェックが入っているデータを、**[納品日] [配車区分] [出版社名]** ごとの納品ヘッダーでまとめて納品書を作成します。")
+    # --- 保存 ＆ 納品書出力ボタンの処理 ---
+    st.markdown("---")
+    col_save, col_pdf, col_excel = st.columns([1.5, 1.5, 1.5])
     
-    if 'edited_flat_df' in locals() and edited_flat_df is not None:
-        delivery_rows = []
-        for _, row in edited_flat_df.iterrows():
-            if row.get("納品", False):
-                ord_no_raw = clean_val(row.get("受注番号", ""))
-                d_date_val = row.get("納品日", "")
-                
-                mmdd = ""
-                if pd.notna(d_date_val):
-                    if isinstance(d_date_val, (date, datetime)):
-                        mmdd = d_date_val.strftime("%m%d")
-                    else:
-                        parsed_d = parse_date_safe(d_date_val)
-                        if parsed_d:
-                            mmdd = parsed_d.strftime("%m%d")
-                if not mmdd:
-                    mmdd = datetime.now().strftime("%m%d")
-                
-                base_ord = ord_no_raw if ord_no_raw else "000000"
-                delivery_no = (base_ord + mmdd)[-10:]
-                if len(delivery_no) < 10:
-                    delivery_no = delivery_no.zfill(10)
+    with col_save:
+        if st.button("💾 変更した行を @pocket に保存", type="primary", key="save_deliv_btn"):
+            update_rows = edited_deliv_df[edited_deliv_df["更新"] == True]
+            if len(update_rows) == 0:
+                st.warning("⚠️ 「更新」にチェックが入っている行がありません。")
+            else:
+                success_count = 0
+                error_messages = []
+                with st.spinner("@pocketへデータを保存中..."):
+                    for _, row in update_rows.iterrows():
+                        r_id = row.get("_recordId", "")
+                        sub_88_id = row.get("_sub_88_id", "")
+                        
+                        sub_88_item = {
+                            "record": {
+                                "field-88_2": date_to_str(row.get("配本日")),
+                                "field-88_4": clean_val(row.get("部数", "")),
+                                "field-88_7": clean_val(row.get("パレット数", "")),
+                                "field-88_8": clean_val(row.get("見本", "")),
+                                "field-88_5": clean_val(row.get("備考", "")),
+                                "field-88_13": clean_val(row.get("預より納品", "")),
+                                "field-88_10": clean_val(row.get("配送振分", ""))
+                            }
+                        }
+                        if sub_88_id:
+                            sub_88_item["Id"] = sub_88_id
 
-                delivery_rows.append({
-                    "納品書番号": delivery_no,
-                    "納品日": clean_val(row.get("納品日", "")),
-                    "配車区分": clean_val(row.get("配車区分", "")),
-                    "出版社名": clean_val(row.get("出版社名", "")),
+                        payload = {
+                            "field-2": clean_val(row.get("受注番号", "")),
+                            "field-88": [sub_88_item]
+                        }
+                        
+                        ok, msg = update_pocket_record(r_id, payload)
+                        if ok:
+                            success_count += 1
+                        else:
+                            error_messages.append(f"ID {r_id}: {msg}")
+                
+                if success_count > 0:
+                    st.success(f"✨ **{success_count} 件** のデータを @pocket へ正常に保存しました！")
+                if error_messages:
+                    for err in error_messages:
+                        st.error(f"❌ 保存エラー: {err}")
+                if success_count > 0:
+                    st.rerun()
+
+    # --- 納品書出力対象（「納品」チェックがあるもの）の処理 ---
+    checked_deliv_rows = edited_deliv_df[edited_deliv_df["納品"] == True]
+
+    with col_pdf:
+        if len(checked_deliv_rows) > 0:
+            from collections import defaultdict
+            grouped_deliv = defaultdict(list)
+            
+            for _, row in checked_deliv_rows.iterrows():
+                cust_name = clean_val(row.get("得意先名", ""))
+                d_date_str = date_to_str(row.get("配本日"))
+                
+                # 伝票番号生成: YYMMHHMM
+                mmdd = d_date_str.replace("-", "")[2:6] if len(d_date_str) >= 10 else datetime.now().strftime("%m%d")
+                base_ord = clean_val(row.get("受注番号", "")) or "000000"
+                deliv_no = (base_ord + mmdd)[-10:].zfill(10)
+                
+                key = (d_date_str, cust_name, deliv_no)
+                grouped_deliv[key].append({
+                    "受注番号": base_ord,
                     "書名": clean_val(row.get("書名", "")),
-                    "製本数": clean_val(row.get("製本数", "0")),
-                    "数量": clean_val(row.get("納品数", "0")),
-                    "PL数": clean_val(row.get("PL数", "0")),
-                    "見本数": clean_val(row.get("見本数量", "0")),
+                    "定価": clean_val(row.get("定価", "")),
+                    "判型": clean_val(row.get("判型", "")),
+                    "刷数": clean_val(row.get("刷数", "")),
+                    "部数": clean_val(row.get("部数", "0")),
+                    "印": clean_val(row.get("印", "")),
+                    "製品預かり": clean_val(row.get("製品預かり", "")),
+                    "預より納品": clean_val(row.get("預より納品", "")),
+                    "パレット数": clean_val(row.get("パレット数", "0")),
+                    "配本日": d_date_str,
+                    "見本": clean_val(row.get("見本", "0")),
                     "備考": clean_val(row.get("備考", ""))
                 })
-    else:
-        delivery_rows = []
-    
-    if not delivery_rows:
-        st.warning("⚠️ 「納品」にチェックが入っている明細がありません。\nタブ1の明細一覧で「納品」チェックを入れてください。")
-    else:
-        st.success(f"✨ 納品対象の明細が **{len(delivery_rows)} 件** 選択されています。")
-        
-        df_preview = pd.DataFrame(delivery_rows)
-        st.dataframe(df_preview, use_container_width=True)
-        
-        from collections import defaultdict
-        grouped_deliv = defaultdict(list)
-        for r in delivery_rows:
-            key = (r["納品日"], r["配車区分"], r["出版社名"], r["納品書番号"])
-            grouped_deliv[key].append(r)
-            
-        col_d1, col_d2 = st.columns(2)
-        with col_d1:
-            excel_bytes_deliv = to_excel_bytes(df_preview)
+
+            pdf_bytes = generate_delivery_pdf(grouped_deliv)
             st.download_button(
-                label="📥 納品書データを Excel でダウンロード",
-                data=excel_bytes_deliv,
-                file_name=f"納品書データ_{date.today().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="dl_excel_deliv"
-            )
-        with col_d2:
-            pdf_bytes_deliv = generate_delivery_pdf(grouped_deliv)
-            st.download_button(
-                label="🖨️ 納品書を PDF でダウンロード",
-                data=pdf_bytes_deliv,
+                label="🖨️ 納品書 PDF ダウンロード",
+                data=pdf_bytes,
                 file_name=f"納品書_{date.today().strftime('%Y%m%d')}.pdf",
-                mime="application/pdf",
-                key="dl_pdf_deliv"
+                mime="application/pdf"
             )
+        else:
+            st.button("🖨️ 納品書 PDF ダウンロード", disabled=True, help="「納品」チェックが1件も入っていません")
 
-# ==========================================
-# タブ3：請求書発行
-# ==========================================
-with tab3:
-    st.header("📄 請求書発行（出版社別・口座指定可）")
-    st.info("💡 タブ1の明細行で**「請求」**のチェックボックスにチェックが入っているデータを、**出版社名ごと**にまとめて請求書を作成します。")
-    
-    bc1, bc2, bc3 = st.columns(3)
-    with bc1:
-        bank_name = st.text_input("銀行名", value="三井住友銀行", key="b_name")
-        bank_branch = st.text_input("支店名", value="岩槻支店", key="b_branch")
-    with bc2:
-        bank_type = st.selectbox("口座種別", options=["普通", "当座"], key="b_type")
-        bank_account = st.text_input("口座番号", value="1234567", key="b_acc")
-    with bc3:
-        bank_holder = st.text_input("口座名義", value="カ）チュウエイセイホンジョ", key="b_holder")
+    with col_excel:
+        if len(checked_deliv_rows) > 0:
+            excel_bytes = to_excel_bytes(checked_deliv_rows.drop(columns=["更新", "詳細", "_record_idx", "_recordId", "_sub_88_id", "得意先名"], errors="ignore"))
+            st.download_button(
+                label="📥 納品データ Excel ダウンロード",
+                data=excel_bytes,
+                file_name=f"納品データ_{date.today().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.button("📥 納品データ Excel ダウンロード", disabled=True, help="「納品」チェックが1件も入っていません")
 
-    if 'edited_flat_df' in locals() and edited_flat_df is not None:
-        invoice_rows = []
-        for _, row in edited_flat_df.iterrows():
-            if row.get("請求", False):
-                invoice_rows.append({
-                    "出版社名": clean_val(row.get("出版社名", "")),
-                    "書名": clean_val(row.get("書名", "")),
-                    "売上日": row.get("売上日"),
-                    "請求数量": clean_val(row.get("請求数量", "0")),
-                    "請求単価": clean_val(row.get("請求単価", "0")),
-                    "内見本数量": clean_val(row.get("内見本数量", "0")),
-                    "備考": clean_val(row.get("備考_請求", ""))
-                })
-    else:
-        invoice_rows = []
-    
-    if not invoice_rows:
-        st.warning("⚠️ 「請求」にチェックが入っている明細がありません。\nタブ1の明細一覧で「請求」チェックを入れてください。")
-    else:
-        st.success(f"✨ 請求対象の明細が **{len(invoice_rows)} 件** 選択されています。")
-        
-        df_inv_preview = pd.DataFrame(invoice_rows)
-        st.dataframe(df_inv_preview, use_container_width=True)
-        
-        from collections import defaultdict
-        grouped_invoice = defaultdict(list)
-        for r in invoice_rows:
-            grouped_invoice[r["出版社名"]].append(r)
-            
-        bank_info_dict = {
-            "bank_name": bank_name,
-            "bank_branch": bank_branch,
-            "bank_type": bank_type,
-            "bank_account": bank_account,
-            "bank_holder": bank_holder
-        }
-        
-        col_i1, col_i2 = st.columns(2)
-        with col_i1:
-            excel_bytes_inv = to_excel_bytes(df_inv_preview)
-            st.download_button(
-                label="📥 請求書データを Excel でダウンロード",
-                data=excel_bytes_inv,
-                file_name=f"請求書データ_{date.today().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="dl_excel_inv"
-            )
-        with col_i2:
-            pdf_bytes_inv = generate_invoice_pdf(grouped_invoice, bank_info_dict)
-            st.download_button(
-                label="🖨️ 請求書を PDF でダウンロード",
-                data=pdf_bytes_inv,
-                file_name=f"請求書_{date.today().strftime('%Y%m%d')}.pdf",
-                mime="application/pdf",
-                key="dl_pdf_inv"
-            )
+else:
+    st.warning("⚠️ 対象データが見つかりませんでした。")
