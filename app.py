@@ -312,7 +312,7 @@ def generate_delivery_pdf(grouped_deliv_dict):
     buffer.seek(0)
     return buffer
 
-# --- 請求書PDF生成関数（振込先・備考反映対応） ---
+# --- 請求書PDF生成関数（金額 field-89_8 の反映対応） ---
 def generate_billing_pdf(grouped_billing_dict, bank_info, billing_memo):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=25, rightMargin=25, topMargin=25, bottomMargin=25)
@@ -359,7 +359,7 @@ def generate_billing_pdf(grouped_billing_dict, bank_info, billing_memo):
             Paragraph("品名", th_style),
             Paragraph("数量", th_style),
             Paragraph("販売単価", th_style),
-            Paragraph("金額（小計）", th_style),
+            Paragraph("金額", th_style),
             Paragraph("備考", th_style),
             Paragraph("見本", th_style)
         ]]
@@ -375,24 +375,24 @@ def generate_billing_pdf(grouped_billing_dict, bank_info, billing_memo):
         total_amount = 0
         for r_idx, item in enumerate(items):
             try:
-                qty = float(str(item["数量"]).replace(",", "")) if item["数量"] else 0
+                amt = float(str(item["金額"]).replace(",", "")) if item["金額"] else 0
             except:
-                qty = 0
-            try:
-                price = float(str(item["販売単価"]).replace(",", "")) if item["販売単価"] else 0
-            except:
-                price = 0
+                try:
+                    qty = float(str(item["数量"]).replace(",", "")) if item["数量"] else 0
+                    price = float(str(item["販売単価"]).replace(",", "")) if item["販売単価"] else 0
+                    amt = qty * price
+                except:
+                    amt = 0
             
-            subtotal = qty * price
-            total_amount += subtotal
+            total_amount += amt
 
             table_data.append([
                 Paragraph(item['売上日'], td_style),
                 Paragraph(item['受注番号'], td_style),
                 Paragraph(item['品名'], td_style),
                 Paragraph(f"{item['数量']} 部", td_right),
-                Paragraph(f"¥{price:,.0f}" if price else "", td_right),
-                Paragraph(f"¥{subtotal:,.0f}" if subtotal else "", td_right),
+                Paragraph(f"¥{float(str(item['販売単価']).replace(',', '')):+,.0f}".replace("+", "") if item['販売単価'] else "", td_right),
+                Paragraph(f"¥{amt:,.0f}" if amt else "", td_right),
                 Paragraph(item['備考'], td_style),
                 Paragraph(f"{item['見本']} 部" if item['見本'] else "", td_right)
             ])
@@ -766,7 +766,7 @@ if api_records:
     # ------------------------------------------
     with tab_billing:
         st.subheader("💰 請求処理・明細管理（field-89）")
-        st.info("💡 納品日が入力済みで、請求区分が【未】のデータが表示されています。請求区分を【済】にすると非表示になります。")
+        st.info("💡 納品日が入力済みで、請求区分が【未】のデータが表示されています。「数量 × 単価」の金額（field-89_8）は自動計算されます。")
 
         # 請求書PDF用オプション入力欄
         with st.expander("🛠️ 請求書PDF出力オプション（振込先・備考の設定）", expanded=False):
@@ -827,6 +827,21 @@ if api_records:
             b_memo = clean_val(rec_89.get("field-89_7"))
             b_mihon = clean_val(rec_89.get("field-89_12")) or default_mihon
 
+            # 金額 (field-89_8) の自動計算（数量 × 単価）
+            try:
+                q_val = float(str(b_qty).replace(",", "")) if b_qty else 0
+            except:
+                q_val = 0
+            try:
+                p_val = float(str(b_unit_price).replace(",", "")) if b_unit_price else 0
+            except:
+                p_val = 0
+            
+            calc_amount = int(q_val * p_val)
+            b_amount = clean_val(rec_89.get("field-89_8"))
+            if not b_amount and calc_amount > 0:
+                b_amount = str(calc_amount)
+
             billing_flat_data.append({
                 "更新": False,
                 "請求区分": b_status,           # field-89_11
@@ -836,6 +851,7 @@ if api_records:
                 "品名": b_item_name,             # field-89_2
                 "数量": b_qty,                   # field-89_3
                 "販売単価": b_unit_price,        # field-89_4
+                "金額": b_amount,                # field-89_8 (自動計算)
                 "備考": b_memo,                  # field-89_7
                 "見本": b_mihon,                 # field-89_12
                 "_recordId": rec_id,
@@ -844,7 +860,7 @@ if api_records:
 
         if billing_flat_data:
             df_billing = pd.DataFrame(billing_flat_data)
-            billing_display_cols = ["更新", "請求区分", "得意先名", "受注番号", "売上日", "品名", "数量", "販売単価", "備考", "見本"]
+            billing_display_cols = ["更新", "請求区分", "得意先名", "受注番号", "売上日", "品名", "数量", "販売単価", "金額", "備考", "見本"]
             df_billing_display = df_billing[[c for c in billing_display_cols if c in df_billing.columns]]
 
             edited_billing_df = st.data_editor(
@@ -861,6 +877,7 @@ if api_records:
                     "品名": st.column_config.TextColumn("品名", help="品名（field-89_2）"),
                     "数量": st.column_config.TextColumn("数量", help="数量（field-89_3）"),
                     "販売単価": st.column_config.TextColumn("販売単価", help="販売単価（field-89_4）"),
+                    "金額": st.column_config.TextColumn("金額", help="金額（field-89_8）※数量×単価の自動計算値"),
                     "備考": st.column_config.TextColumn("備考", help="備考（field-89_7）"),
                     "見本": st.column_config.TextColumn("見本", help="見本（field-89_12）")
                 }
@@ -901,15 +918,29 @@ if api_records:
                                     b_error_messages.append(f"受注番号 {ord_no}: レコードIDが取得できませんでした")
                                     continue
 
+                                # 数量 × 単価を再計算して保存データに含める
+                                q_str = clean_val(row.get("数量", ""))
+                                p_str = clean_val(row.get("販売単価", ""))
+                                try:
+                                    q_val = float(str(q_str).replace(",", "")) if q_str else 0
+                                except:
+                                    q_val = 0
+                                try:
+                                    p_val = float(str(p_str).replace(",", "")) if p_str else 0
+                                except:
+                                    p_val = 0
+                                calc_amt = str(int(q_val * p_val))
+
                                 sub_89_item = {
                                     "record": {
                                         "field-89_1": date_to_str(row.get("売上日")),
                                         "field-89_2": clean_val(row.get("品名", "")),
-                                        "field-89_3": clean_val(row.get("数量", "")),
-                                        "field-89_4": clean_val(row.get("販売単価", "")),
+                                        "field-89_3": q_str,
+                                        "field-89_4": p_str,
+                                        "field-89_8": calc_amt,  # ★ 金額 (field-89_8) を自動保存
                                         "field-89_7": clean_val(row.get("備考", "")),
                                         "field-89_12": clean_val(row.get("見本", "")),
-                                        "field-89_11": clean_val(row.get("請求区分", ""))  # ★ 請求区分保存
+                                        "field-89_11": clean_val(row.get("請求区分", ""))
                                     }
                                 }
                                 if sub_89_id:
@@ -946,6 +977,7 @@ if api_records:
                         "品名": clean_val(row.get("品名", "")),
                         "数量": clean_val(row.get("数量", "0")),
                         "販売単価": clean_val(row.get("販売単価", "0")),
+                        "金額": clean_val(row.get("金額", "0")),
                         "備考": clean_val(row.get("備考", "")),
                         "見本": clean_val(row.get("見本", "0"))
                     })
