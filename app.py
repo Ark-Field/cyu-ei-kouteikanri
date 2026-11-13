@@ -204,7 +204,6 @@ def generate_delivery_pdf(grouped_deliv_dict):
     elements = []
     
     for idx, ((d_date, cust_name, deliv_no), items) in enumerate(grouped_deliv_dict.items()):
-        # 1ページあたり最大8レコードに分割
         chunk_size = 8
         item_chunks = [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
         
@@ -233,7 +232,6 @@ def generate_delivery_pdf(grouped_deliv_dict):
             elements.append(Paragraph("下記のとおり納品いたしました。", h_style))
             elements.append(Spacer(1, 4))
             
-            # 明細ヘッダー
             table_data = [[
                 Paragraph("受注番号", th_style),
                 Paragraph("書名", th_style),
@@ -255,7 +253,6 @@ def generate_delivery_pdf(grouped_deliv_dict):
             
             row_idx = 1
             for item in chunk_items:
-                # ①行目（上段）：受注番号｜書名｜定価｜判型｜刷数｜部数｜パレット数｜見本
                 table_data.append([
                     Paragraph(item['受注番号'], td_style),
                     Paragraph(item['書名'], td_style),
@@ -266,7 +263,6 @@ def generate_delivery_pdf(grouped_deliv_dict):
                     Paragraph(f"{item['パレット数']} PL", td_right),
                     Paragraph(f"{item['見本']} 部", td_right)
                 ])
-                # ②行目（下段）：備考（15文字幅）｜印（4字幅）｜製品預かり（4字幅）｜預より納品（3字幅）｜配本日（3.5字幅）
                 table_data.append([
                     Paragraph(f"<b>備考:</b> {item['備考']}", td_sub_style), "", "", "",
                     Paragraph(f"<b>印:</b> {item['印']}", td_sub_style),
@@ -275,15 +271,12 @@ def generate_delivery_pdf(grouped_deliv_dict):
                     Paragraph(f"<b>配本:</b> {item['配本日']}", td_sub_style)
                 ])
                 
-                # 下段の備考欄を上段の主要カラム（0〜3列目）まで結合
                 t_styles.append(("SPAN", (0, row_idx + 1), (3, row_idx + 1)))
-                # レコードごとに背景色を交互に設定
                 bg_color = colors.HexColor("#F8FAFC") if (row_idx // 2) % 2 == 1 else colors.white
                 t_styles.append(("BACKGROUND", (0, row_idx), (-1, row_idx + 1), bg_color))
                 
                 row_idx += 2
                 
-            # カラム幅定義（合計792pt）
             col_widths = [70, 272, 50, 45, 45, 55, 100, 55]
             d_table = Table(table_data, colWidths=col_widths)
             d_table.setStyle(TableStyle(t_styles))
@@ -409,7 +402,7 @@ if api_records:
         detail_url = f"{POCKET_BASE_URL}/apps/{APP_ID}/records/{rec_id}/detail" if rec_id and rec_id.lower() != "none" else ""
 
         h_ord_no = clean_val(r.get("field-2", ""))
-        h_pub = clean_val(r.get("field-8", ""))       # 得意先名
+        h_pub = clean_val(r.get("field-8", ""))       # 得意先名 (field-8)
         h_title = clean_val(r.get("field-13", ""))
         h_price = clean_val(r.get("field-20", ""))      # 定価 (field-20)
         h_format = clean_val(r.get("field-23", ""))     # 判型
@@ -430,6 +423,7 @@ if api_records:
         flat_data.append({
             "更新": False,
             "詳細": detail_url,
+            "得意先名": h_pub,  # ★追加
             "受注番号": h_ord_no,
             "書名": h_title,
             "定価": h_price,
@@ -447,15 +441,14 @@ if api_records:
             "配送振分": clean_val(rec_88.get("field-88_10", "")),
             "_record_idx": record_idx,
             "_recordId": rec_id,
-            "_sub_88_id": sub_88_id,
-            "得意先名": h_pub
+            "_sub_88_id": sub_88_id
         })
 
     df_deliv = pd.DataFrame(flat_data)
 
-    # 画面表示項目構成の順序に並び替え
+    # 画面表示項目構成の順序に並び替え（得意先名を追加）
     display_cols = [
-        "更新", "詳細", "受注番号", "書名", "定価", "判型", "刷数", 
+        "更新", "詳細", "得意先名", "受注番号", "書名", "定価", "判型", "刷数", 
         "部数", "印", "製品預かり", "預より納品", "パレット数", "配本日", "見本", "備考", "納品", "配送振分"
     ]
     df_deliv_display = df_deliv[[c for c in display_cols if c in df_deliv.columns]]
@@ -468,6 +461,7 @@ if api_records:
         column_config={
             "更新": st.column_config.CheckboxColumn("更新", required=True, help="チェックを入れた行を@pocketに保存します"),
             "詳細": st.column_config.LinkColumn("🔗詳細", help="@pocket詳細画面を開く", display_text="📝開く"),
+            "得意先名": st.column_config.TextColumn("得意先名", disabled=True, help="得意先名（field-8）"),
             "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
             "書名": st.column_config.TextColumn("書名", disabled=True),
             "定価": st.column_config.TextColumn("定価", disabled=True),
@@ -552,7 +546,6 @@ if api_records:
                 cust_name = clean_val(row.get("得意先名", ""))
                 d_date_str = date_to_str(row.get("配本日"))
                 
-                # 伝票番号生成: YYMMHHMM
                 mmdd = d_date_str.replace("-", "")[2:6] if len(d_date_str) >= 10 else datetime.now().strftime("%m%d")
                 base_ord = clean_val(row.get("受注番号", "")) or "000000"
                 deliv_no = (base_ord + mmdd)[-10:].zfill(10)
@@ -586,7 +579,7 @@ if api_records:
 
     with col_excel:
         if len(checked_deliv_rows) > 0:
-            excel_bytes = to_excel_bytes(checked_deliv_rows.drop(columns=["更新", "詳細", "_record_idx", "_recordId", "_sub_88_id", "得意先名"], errors="ignore"))
+            excel_bytes = to_excel_bytes(checked_deliv_rows.drop(columns=["更新", "詳細", "_record_idx", "_recordId", "_sub_88_id"], errors="ignore"))
             st.download_button(
                 label="📥 納品データ Excel ダウンロード",
                 data=excel_bytes,
