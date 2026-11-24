@@ -12,8 +12,13 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase.pdfmetrics import registerFontFamily
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle, PageBreak
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+
+# OpenPyXL関連のインポート（Excel装飾出力用）
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 # ==========================================
 # 1. ページ基本設定 ＆ 濃紺シックデザインCSS
@@ -84,23 +89,51 @@ st.markdown(dark_navy_theme_css, unsafe_allow_html=True)
 st.title("📦 納品・請求管理システム（@pocket連動）")
 
 # ==========================================
-# 2. 日本語フォント登録処理（ReportLab用）
+# 2. 日本語フォント登録処理（ReportLab用・太字対応）
 # ==========================================
 def setup_japanese_font():
-    local_font_path = "NotoSansJP-Regular.ttf"
-    if os.path.exists(local_font_path):
+    win_fonts_dir = os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "Fonts")
+    
+    local_reg = "NotoSansJP-Regular.ttf"
+    local_bold = "NotoSansJP-Bold.ttf"
+    
+    if os.path.exists(local_reg):
         try:
-            pdfmetrics.registerFont(TTFont("JPFont", local_font_path))
+            pdfmetrics.registerFont(TTFont("JPFont", local_reg))
+            if os.path.exists(local_bold):
+                pdfmetrics.registerFont(TTFont("JPFont-Bold", local_bold))
+            else:
+                meiryo_b = os.path.join(win_fonts_dir, "meiryob.ttc")
+                if os.path.exists(meiryo_b):
+                    pdfmetrics.registerFont(TTFont("JPFont-Bold", meiryo_b, subfontIndex=0))
+                else:
+                    pdfmetrics.registerFont(TTFont("JPFont-Bold", local_reg))
+            
+            registerFontFamily("JPFont", normal="JPFont", bold="JPFont-Bold", italic="JPFont", boldItalic="JPFont-Bold")
             return "JPFont"
         except Exception as e:
             print(f"同梱フォント登録エラー: {e}")
 
-    win_font = os.path.join(
-        os.environ.get("SystemRoot", "C:\\Windows"), "Fonts", "msgothic.ttc"
-    )
+    meiryo_reg = os.path.join(win_fonts_dir, "meiryo.ttc")
+    meiryo_bold = os.path.join(win_fonts_dir, "meiryob.ttc")
+    if os.path.exists(meiryo_reg):
+        try:
+            pdfmetrics.registerFont(TTFont("JPFont", meiryo_reg, subfontIndex=0))
+            if os.path.exists(meiryo_bold):
+                pdfmetrics.registerFont(TTFont("JPFont-Bold", meiryo_bold, subfontIndex=0))
+            else:
+                pdfmetrics.registerFont(TTFont("JPFont-Bold", meiryo_reg, subfontIndex=0))
+            registerFontFamily("JPFont", normal="JPFont", bold="JPFont-Bold", italic="JPFont", boldItalic="JPFont-Bold")
+            return "JPFont"
+        except Exception as e:
+            print(f"メイリオ登録エラー: {e}")
+
+    win_font = os.path.join(win_fonts_dir, "msgothic.ttc")
     if os.path.exists(win_font):
         try:
             pdfmetrics.registerFont(TTFont("JPFont", win_font, subfontIndex=0))
+            pdfmetrics.registerFont(TTFont("JPFont-Bold", win_font, subfontIndex=0))
+            registerFontFamily("JPFont", normal="JPFont", bold="JPFont-Bold", italic="JPFont", boldItalic="JPFont-Bold")
             return "JPFont"
         except Exception as e:
             print(f"Windowsフォント登録エラー: {e}")
@@ -176,10 +209,121 @@ def date_to_str(val):
     parsed = parse_date_safe(val)
     return parsed.strftime("%Y-%m-%d") if parsed else ""
 
-def to_excel_bytes(df):
+def _calc_display_width(text):
+    """全角文字を2、半角文字を1として表示幅を計算"""
+    width = 0
+    for ch in str(text):
+        if ord(ch) > 255:
+            width += 2.1
+        else:
+            width += 1.1
+    return width
+
+def to_excel_bytes(df, sheet_name="出力データ"):
+    """DataFrameを業務帳票レベルにきれいに装飾してExcelバイト列で返す"""
+    export_df = df.copy()
+
+    # 数値列の型変換（金額・数量・単価・定価・刷数・印刷数・製本数・パレット数・見本）
+    numeric_cols = ["定価", "刷数", "印刷数", "製本数", "パレット数", "見本", "数量", "販売単価", "金額"]
+    for col in numeric_cols:
+        if col in export_df.columns:
+            def _to_num(v):
+                s = clean_val(v).replace(",", "")
+                if not s:
+                    return None
+                try:
+                    f = float(s)
+                    return int(f) if f.is_integer() else f
+                except ValueError:
+                    return v
+            export_df[col] = export_df[col].apply(_to_num)
+
+    # bool列（チェックボックス）をわかりやすい記号へ変換
+    if "納品" in export_df.columns:
+        export_df["納品"] = export_df["納品"].apply(lambda x: "✔" if x is True else "")
+
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Sheet1")
+        export_df.to_excel(writer, index=False, sheet_name=sheet_name)
+        ws = writer.sheets[sheet_name]
+
+        font_header = Font(name="Yu Gothic", size=10, bold=True, color="FFFFFF")
+        font_body = Font(name="Yu Gothic", size=10, bold=False, color="1E293B")
+        fill_header = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+        fill_zebra = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+        fill_white = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+
+        thin_side = Side(style="thin", color="CBD5E1")
+        header_bottom = Side(style="medium", color="0F172A")
+        border_data = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+        border_header = Border(left=thin_side, right=thin_side, top=thin_side, bottom=header_bottom)
+
+        align_header = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        align_center = Alignment(horizontal="center", vertical="center")
+        align_right = Alignment(horizontal="right", vertical="center")
+        align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+        center_cols = {"納期", "納品日", "配本日", "売上日", "受注番号", "ISBN", "判型", "請求区分", "納品", "預より納品"}
+
+        # 1. ヘッダー行の装飾
+        ws.row_dimensions[1].height = 26
+        for col_idx in range(1, len(export_df.columns) + 1):
+            cell = ws.cell(row=1, column=col_idx)
+            cell.font = font_header
+            cell.fill = fill_header
+            cell.alignment = align_header
+            cell.border = border_header
+
+        # 2. データ行の装飾
+        for row_idx in range(2, len(export_df) + 2):
+            ws.row_dimensions[row_idx].height = 21
+            row_fill = fill_zebra if row_idx % 2 == 1 else fill_white
+
+            for col_idx, col_name in enumerate(export_df.columns, start=1):
+                cell = ws.cell(row=row_idx, column=col_idx)
+                cell.font = font_body
+                cell.fill = row_fill
+                cell.border = border_data
+
+                val = cell.value
+                if isinstance(val, (date, datetime)):
+                    cell.number_format = "yyyy-mm-dd"
+                    cell.alignment = align_center
+                elif col_name in numeric_cols and isinstance(val, (int, float)):
+                    cell.number_format = "#,##0"
+                    cell.alignment = align_right
+                elif col_name in center_cols:
+                    cell.alignment = align_center
+                else:
+                    cell.alignment = align_left
+
+        # 3. 列幅の自動調整（全角対応）
+        for col_idx, col_name in enumerate(export_df.columns, start=1):
+            max_w = _calc_display_width(col_name)
+            for row_idx in range(2, len(export_df) + 2):
+                cell_val = ws.cell(row=row_idx, column=col_idx).value
+                if cell_val is not None:
+                    if isinstance(cell_val, (date, datetime)):
+                        disp_str = "2026-12-31"
+                    elif isinstance(cell_val, (int, float)):
+                        disp_str = f"{cell_val:,.0f}"
+                    else:
+                        disp_str = str(cell_val)
+                    line_max = max((_calc_display_width(line) for line in disp_str.split("\n")), default=0)
+                    if line_max > max_w:
+                        max_w = line_max
+            adjusted_width = min(max(max_w + 4, 10), 48)
+            ws.column_dimensions[get_column_letter(col_idx)].width = adjusted_width
+
+        # 4. ウィンドウ枠の固定 ＆ 印刷レイアウト設定（A4横・1ページ幅フィット）
+        ws.freeze_panes = "A2"
+        ws.views.sheetView[0].showGridLines = True
+        ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
+        ws.page_setup.paperSize = ws.PAPERSIZE_A4
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = 0
+
     output.seek(0)
     return output
 
@@ -212,14 +356,14 @@ def generate_delivery_pdf(grouped_deliv_dict):
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=25, rightMargin=25, topMargin=25, bottomMargin=25)
     styles = getSampleStyleSheet()
     
-    title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=16, leading=18, alignment=1, textColor=colors.HexColor("#1E3A8A"))
-    h_style = ParagraphStyle("H", parent=styles["Normal"], fontName=FONT_NAME, fontSize=9, leading=12, textColor=colors.HexColor("#333333"))
+    title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=f"{FONT_NAME}-Bold" if FONT_NAME == "JPFont" else FONT_NAME, fontSize=17, leading=20, alignment=1, textColor=colors.HexColor("#1E3A8A"))
+    h_style = ParagraphStyle("H", parent=styles["Normal"], fontName=FONT_NAME, fontSize=9.5, leading=13, textColor=colors.HexColor("#1E293B"))
     company_style = ParagraphStyle("SInfo", parent=styles["Normal"], fontName=FONT_NAME, fontSize=11, leading=15, textColor=colors.HexColor("#0F172A"), alignment=2)
     
-    th_style = ParagraphStyle("TH", parent=styles["Normal"], fontName=FONT_NAME, fontSize=8, leading=10, textColor=colors.white, alignment=1)
-    td_style = ParagraphStyle("TD", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7.5, leading=9.5, textColor=colors.HexColor("#1E293B"))
+    th_style = ParagraphStyle("TH", parent=styles["Normal"], fontName=f"{FONT_NAME}-Bold" if FONT_NAME == "JPFont" else FONT_NAME, fontSize=8.5, leading=11, textColor=colors.white, alignment=1)
+    td_style = ParagraphStyle("TD", parent=styles["Normal"], fontName=FONT_NAME, fontSize=8, leading=10, textColor=colors.HexColor("#0F172A"))
     td_right = ParagraphStyle("TDR", parent=td_style, alignment=2)
-    td_sub_style = ParagraphStyle("TDSub", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7, leading=9, textColor=colors.HexColor("#475569"))
+    td_sub_style = ParagraphStyle("TDSub", parent=styles["Normal"], fontName=FONT_NAME, fontSize=7.5, leading=9.5, textColor=colors.HexColor("#334155"))
 
     elements = []
     
@@ -238,15 +382,15 @@ def generate_delivery_pdf(grouped_deliv_dict):
             elements.append(Paragraph("<b>納 品 書</b>", title_style))
             elements.append(Spacer(1, 6))
             
-            shipping_label = f" (配送振分: {shipping_div})" if shipping_div else ""
+            shipping_label = f" <b>(配送振分: {shipping_div})</b>" if shipping_div else ""
             meta_data = [
                 [
-                    Paragraph(f"<b>{cust_name if cust_name else '（得意先名未設定）'} 御中</b>{shipping_label}", ParagraphStyle("CName", parent=h_style, fontSize=12, leading=14)),
+                    Paragraph(f"<b>{cust_name if cust_name else '（得意先名未設定）'} 御中</b>{shipping_label}", ParagraphStyle("CName", parent=h_style, fontSize=12.5, leading=15)),
                     Paragraph("<b>(株)中永製本所</b><br/>埼玉県さいたま市岩槻区真福寺1400<br/>TEL 048-798-7377", company_style)
                 ],
                 [
-                    Paragraph(f"伝票番号: {deliv_no}<br/>納品日: {d_date if d_date else '（未設定）'}", h_style),
-                    Paragraph(f"発行日: {date.today().strftime('%Y年%m月%d日')}", ParagraphStyle("DateInfo", parent=h_style, alignment=2))
+                    Paragraph(f"<b>伝票番号:</b> {deliv_no}<br/><b>納品日:</b> {d_date if d_date else '（未設定）'}", h_style),
+                    Paragraph(f"<b>発行日:</b> {date.today().strftime('%Y年%m月%d日')}", ParagraphStyle("DateInfo", parent=h_style, alignment=2))
                 ]
             ]
             meta_table = Table(meta_data, colWidths=[400, 392])
@@ -258,40 +402,40 @@ def generate_delivery_pdf(grouped_deliv_dict):
             elements.append(Spacer(1, 4))
             
             table_data = [[
-                Paragraph("受注番号", th_style),
-                Paragraph("書名", th_style),
-                Paragraph("定価", th_style),
-                Paragraph("判型", th_style),
-                Paragraph("刷数", th_style),
-                Paragraph("部数", th_style),
-                Paragraph("パレット数", th_style),
-                Paragraph("見本", th_style)
+                Paragraph("<b>受注番号</b>", th_style),
+                Paragraph("<b>書名</b>", th_style),
+                Paragraph("<b>定価</b>", th_style),
+                Paragraph("<b>判型</b>", th_style),
+                Paragraph("<b>刷数</b>", th_style),
+                Paragraph("<b>印刷数</b>", th_style),
+                Paragraph("<b>パレット数</b>", th_style),
+                Paragraph("<b>見本</b>", th_style)
             ]]
             
             t_styles = [
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-                ("TOPPADDING", (0, 0), (-1, -1), 2),
-                ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E1")),
             ]
             
             row_idx = 1
             for item in chunk_items:
                 table_data.append([
-                    Paragraph(item['受注番号'], td_style),
-                    Paragraph(item['書名'], td_style),
+                    Paragraph(f"<b>{item['受注番号']}</b>", td_style),
+                    Paragraph(f"<b>{item['書名']}</b>", td_style),
                     Paragraph(item['定価'], td_right),
                     Paragraph(item['判型'], td_style),
                     Paragraph(item['刷数'], td_right),
-                    Paragraph(f"{item['部数']} 部", td_right),
+                    Paragraph(f"<b>{item['印刷数']} 部</b>", td_right),
                     Paragraph(f"{item['パレット数']} PL", td_right),
                     Paragraph(f"{item['見本']} 部", td_right)
                 ])
                 table_data.append([
                     Paragraph(f"<b>ISBN:</b> {item['ISBN']}", td_sub_style),
                     Paragraph(f"<b>備考:</b> {item['備考']}", td_sub_style), "", "",
-                    Paragraph(f"<b>印:</b> {item['印']}", td_sub_style),
+                    Paragraph(f"<b>製本数:</b> {item['製本数']}", td_sub_style),
                     Paragraph(f"<b>製品預:</b> {item['製品預かり']}", td_sub_style),
                     Paragraph(f"<b>預納品:</b> {item['預より納品']}", td_sub_style),
                     Paragraph(f"<b>納品日:</b> {item['納品日']}", td_sub_style)
@@ -318,12 +462,12 @@ def generate_billing_pdf(grouped_billing_dict, bank_info, billing_memo):
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=25, rightMargin=25, topMargin=25, bottomMargin=25)
     styles = getSampleStyleSheet()
     
-    title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=FONT_NAME, fontSize=16, leading=18, alignment=1, textColor=colors.HexColor("#1E3A8A"))
-    h_style = ParagraphStyle("H", parent=styles["Normal"], fontName=FONT_NAME, fontSize=9, leading=12, textColor=colors.HexColor("#333333"))
+    title_style = ParagraphStyle("Title", parent=styles["Normal"], fontName=f"{FONT_NAME}-Bold" if FONT_NAME == "JPFont" else FONT_NAME, fontSize=17, leading=20, alignment=1, textColor=colors.HexColor("#1E3A8A"))
+    h_style = ParagraphStyle("H", parent=styles["Normal"], fontName=FONT_NAME, fontSize=9.5, leading=13, textColor=colors.HexColor("#1E293B"))
     company_style = ParagraphStyle("SInfo", parent=styles["Normal"], fontName=FONT_NAME, fontSize=11, leading=15, textColor=colors.HexColor("#0F172A"), alignment=2)
     
-    th_style = ParagraphStyle("TH", parent=styles["Normal"], fontName=FONT_NAME, fontSize=8, leading=10, textColor=colors.white, alignment=1)
-    td_style = ParagraphStyle("TD", parent=styles["Normal"], fontName=FONT_NAME, fontSize=8, leading=10, textColor=colors.HexColor("#1E293B"))
+    th_style = ParagraphStyle("TH", parent=styles["Normal"], fontName=f"{FONT_NAME}-Bold" if FONT_NAME == "JPFont" else FONT_NAME, fontSize=8.5, leading=11, textColor=colors.white, alignment=1)
+    td_style = ParagraphStyle("TD", parent=styles["Normal"], fontName=FONT_NAME, fontSize=8.5, leading=10.5, textColor=colors.HexColor("#0F172A"))
     td_right = ParagraphStyle("TDR", parent=td_style, alignment=2)
 
     elements = []
@@ -337,11 +481,11 @@ def generate_billing_pdf(grouped_billing_dict, bank_info, billing_memo):
         
         meta_data = [
             [
-                Paragraph(f"<b>{cust_name if cust_name else '（得意先名未設定）'} 御中</b>", ParagraphStyle("CName", parent=h_style, fontSize=12, leading=14)),
+                Paragraph(f"<b>{cust_name if cust_name else '（得意先名未設定）'} 御中</b>", ParagraphStyle("CName", parent=h_style, fontSize=12.5, leading=15)),
                 Paragraph("<b>(株)中永製本所</b><br/>埼玉県さいたま市岩槻区真福寺1400<br/>TEL 048-798-7377", company_style)
             ],
             [
-                Paragraph(f"請求発行日: {date.today().strftime('%Y年%m月%d日')}", h_style),
+                Paragraph(f"<b>請求発行日:</b> {date.today().strftime('%Y年%m月%d日')}", h_style),
                 Paragraph("", h_style)
             ]
         ]
@@ -354,22 +498,22 @@ def generate_billing_pdf(grouped_billing_dict, bank_info, billing_memo):
         elements.append(Spacer(1, 6))
         
         table_data = [[
-            Paragraph("売上日", th_style),
-            Paragraph("受注番号", th_style),
-            Paragraph("品名", th_style),
-            Paragraph("数量", th_style),
-            Paragraph("販売単価", th_style),
-            Paragraph("金額", th_style),
-            Paragraph("備考", th_style),
-            Paragraph("見本", th_style)
+            Paragraph("<b>売上日</b>", th_style),
+            Paragraph("<b>受注番号</b>", th_style),
+            Paragraph("<b>品名</b>", th_style),
+            Paragraph("<b>数量</b>", th_style),
+            Paragraph("<b>販売単価</b>", th_style),
+            Paragraph("<b>金額</b>", th_style),
+            Paragraph("<b>備考</b>", th_style),
+            Paragraph("<b>見本</b>", th_style)
         ]]
         
         t_styles = [
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1E3A8A")),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+            ("TOPPADDING", (0, 0), (-1, -1), 3.5),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E1")),
         ]
         
         total_amount = 0
@@ -389,17 +533,16 @@ def generate_billing_pdf(grouped_billing_dict, bank_info, billing_memo):
             table_data.append([
                 Paragraph(item['売上日'], td_style),
                 Paragraph(item['受注番号'], td_style),
-                Paragraph(item['品名'], td_style),
+                Paragraph(f"<b>{item['品名']}</b>", td_style),
                 Paragraph(f"{item['数量']} 部", td_right),
                 Paragraph(f"¥{float(str(item['販売単価']).replace(',', '')):+,.0f}".replace("+", "") if item['販売単価'] else "", td_right),
-                Paragraph(f"¥{amt:,.0f}" if amt else "", td_right),
+                Paragraph(f"<b>¥{amt:,.0f}</b>" if amt else "", td_right),
                 Paragraph(item['備考'], td_style),
                 Paragraph(f"{item['見本']} 部" if item['見本'] else "", td_right)
             ])
             bg_color = colors.HexColor("#F8FAFC") if r_idx % 2 == 1 else colors.white
             t_styles.append(("BACKGROUND", (0, r_idx + 1), (-1, r_idx + 1), bg_color))
 
-        # 合計行の追加
         table_data.append([
             Paragraph("<b>合計金額（税込）</b>", td_style), "", "", "", "",
             Paragraph(f"<b>¥{total_amount:,.0f}</b>", td_right), "", ""
@@ -414,7 +557,6 @@ def generate_billing_pdf(grouped_billing_dict, bank_info, billing_memo):
         elements.append(b_table)
         elements.append(Spacer(1, 8))
 
-        # 振込先口座情報 ＆ 備考の表示セクション
         footer_data = [
             [
                 Paragraph(f"<b>【お振込先】</b><br/>{bank_info.replace(chr(10), '<br/>') if bank_info else ''}", h_style),
@@ -565,7 +707,7 @@ if api_records:
             h_price = clean_val(r.get("field-20", ""))
             h_format = clean_val(r.get("field-23", ""))
             h_print_count = clean_val(r.get("field-28", ""))
-            h_stamp = clean_val(r.get("field-4", ""))
+            h_binding_count = clean_val(r.get("field-4", ""))
             h_cust_keeping = clean_val(r.get("field-81", ""))
             
             sub_88 = r.get("field-88", [])
@@ -588,9 +730,9 @@ if api_records:
                     "定価": h_price,
                     "判型": h_format,
                     "刷数": h_print_count,
-                    "部数": clean_val(rec_88.get("field-88_4", "")),
+                    "印刷数": clean_val(rec_88.get("field-88_4", "")),
                     "納品日": parse_date_safe(rec_88.get("field-88_2")),
-                    "印": h_stamp,
+                    "製本数": h_binding_count,
                     "製品預かり": h_cust_keeping,
                     "預より納品": val_88_13,
                     "パレット数": clean_val(rec_88.get("field-88_7", "")),
@@ -607,7 +749,7 @@ if api_records:
         df_deliv = pd.DataFrame(flat_data)
         display_cols = [
             "更新", "詳細", "納期", "得意先名", "受注番号", "ISBN", "書名", "定価", "判型", "刷数", 
-            "部数", "納品日", "印", "製品預かり", "預より納品", "パレット数", "配本日", "見本", "備考", "納品", "配送振分"
+            "印刷数", "納品日", "製本数", "製品預かり", "預より納品", "パレット数", "配本日", "見本", "備考", "納品", "配送振分"
         ]
         df_deliv_display = df_deliv[[c for c in display_cols if c in df_deliv.columns]]
 
@@ -627,9 +769,9 @@ if api_records:
                 "定価": st.column_config.TextColumn("定価", disabled=True),
                 "判型": st.column_config.TextColumn("判型", disabled=True),
                 "刷数": st.column_config.TextColumn("刷数", disabled=True),
-                "部数": st.column_config.TextColumn("部数"),
+                "印刷数": st.column_config.TextColumn("印刷数"),
                 "納品日": st.column_config.DateColumn("納品日", format="YYYY-MM-DD"),
-                "印": st.column_config.TextColumn("印", disabled=True),
+                "製本数": st.column_config.TextColumn("製本数", disabled=True),
                 "製品預かり": st.column_config.TextColumn("製品預かり", disabled=True),
                 "預より納品": st.column_config.SelectboxColumn("預より納品", options=["", "在庫から"]),
                 "パレット数": st.column_config.TextColumn("パレット数"),
@@ -653,7 +795,6 @@ if api_records:
                     success_count = 0
                     error_messages = []
                     with st.spinner("@pocketへデータを保存中..."):
-                        # ★同一親レコードごとの変更をグループ化して一括送信
                         grouped_deliv_updates = {}
                         for _, row in update_rows.iterrows():
                             r_id = clean_val(row.get("_recordId", ""))
@@ -704,7 +845,7 @@ if api_records:
                                 sub_88_id = clean_val(row.get("_sub_88_id", ""))
                                 edited_item_data = {
                                     "field-88_2": date_to_str(row.get("納品日")),
-                                    "field-88_4": clean_val(row.get("部数", "")),
+                                    "field-88_4": clean_val(row.get("印刷数", "")),
                                     "field-88_7": clean_val(row.get("パレット数", "")),
                                     "field-88_8": clean_val(row.get("見本", "")),
                                     "field-88_5": clean_val(row.get("備考", "")),
@@ -769,9 +910,9 @@ if api_records:
                         "定価": clean_val(row.get("定価", "")),
                         "判型": clean_val(row.get("判型", "")),
                         "刷数": clean_val(row.get("刷数", "")),
-                        "部数": clean_val(row.get("部数", "0")),
+                        "印刷数": clean_val(row.get("印刷数", "0")),
                         "納品日": d_date_str,
-                        "印": clean_val(row.get("印", "")),
+                        "製本数": clean_val(row.get("製本数", "")),
                         "製品預かり": clean_val(row.get("製品預かり", "")),
                         "預より納品": clean_val(row.get("預より納品", "")),
                         "パレット数": clean_val(row.get("パレット数", "0")),
@@ -792,7 +933,8 @@ if api_records:
 
         with col_excel:
             if len(checked_deliv_rows) > 0:
-                excel_bytes = to_excel_bytes(checked_deliv_rows.drop(columns=["更新", "詳細", "_record_idx", "_recordId", "_sub_88_id"], errors="ignore"))
+                excel_df = checked_deliv_rows.drop(columns=["更新", "詳細", "_record_idx", "_recordId", "_sub_88_id"], errors="ignore")
+                excel_bytes = to_excel_bytes(excel_df, sheet_name="納品データ")
                 st.download_button(
                     label="📥 納品データ Excel ダウンロード",
                     data=excel_bytes,
@@ -809,7 +951,6 @@ if api_records:
         st.subheader("💰 請求処理・明細管理（field-89）")
         st.info("💡 納品日が入力済みで、請求区分が【未】のデータが表示されています。「数量 × 単価」の金額（field-89_8）は自動計算されます。")
 
-        # 請求書PDF用オプション入力欄
         with st.expander("🛠️ 請求書PDF出力オプション（振込先・備考の設定）", expanded=False):
             col_b1, col_b2 = st.columns(2)
             with col_b1:
@@ -835,6 +976,7 @@ if api_records:
             h_ord_no = clean_val(r.get("field-2", ""))
             h_pub = clean_val(r.get("field-8", ""))
             h_title = clean_val(r.get("field-13", ""))
+            h_binding_count = clean_val(r.get("field-4", ""))
             h_unit_price_default = clean_val(r.get("field-5", ""))
 
             sub_88 = r.get("field-88", [])
@@ -843,7 +985,7 @@ if api_records:
             
             raw_deliv_date = clean_val(rec_88.get("field-88_2", ""))
             if not raw_deliv_date:
-                continue  # 納品日未入力は除外
+                continue
 
             default_mihon = clean_val(rec_88.get("field-88_8", ""))
             default_qty = clean_val(rec_88.get("field-88_4", ""))
@@ -893,19 +1035,20 @@ if api_records:
                     "受注番号": h_ord_no,
                     "売上日": b_sales_date,
                     "品名": b_item_name,
+                    "製本数": h_binding_count,
                     "数量": b_qty,
                     "販売単価": b_unit_price,
                     "金額": b_amount,
                     "備考": b_memo,
                     "見本": b_mihon,
-                    "_record_idx": record_idx,  # ★ ここに正しくインデックスを保持
+                    "_record_idx": record_idx,
                     "_recordId": rec_id,
                     "_sub_89_id": sub_89_id
                 })
 
         if billing_flat_data:
             df_billing = pd.DataFrame(billing_flat_data)
-            billing_display_cols = ["更新", "詳細", "請求区分", "得意先名", "受注番号", "売上日", "品名", "数量", "販売単価", "金額", "備考", "見本"]
+            billing_display_cols = ["更新", "詳細", "請求区分", "得意先名", "受注番号", "売上日", "品名", "製本数", "数量", "販売単価", "金額", "備考", "見本"]
             df_billing_display = df_billing[[c for c in billing_display_cols if c in df_billing.columns]]
 
             edited_billing_df = st.data_editor(
@@ -921,6 +1064,7 @@ if api_records:
                     "受注番号": st.column_config.TextColumn("受注番号", disabled=True),
                     "売上日": st.column_config.DateColumn("売上日", format="YYYY-MM-DD", help="売上日（field-89_1）"),
                     "品名": st.column_config.TextColumn("品名", help="品名（field-89_2）"),
+                    "製本数": st.column_config.TextColumn("製本数", disabled=True),
                     "数量": st.column_config.TextColumn("数量", help="数量（field-89_3）"),
                     "販売単価": st.column_config.TextColumn("販売単価", help="販売単価（field-89_4）"),
                     "金額": st.column_config.TextColumn("金額", help="金額（field-89_8）※数量×単価の自動計算値"),
@@ -941,7 +1085,6 @@ if api_records:
                         b_success_count = 0
                         b_error_messages = []
                         with st.spinner("@pocketへ請求明細を保存中..."):
-                            # ★同一親レコードごとの変更をグループ化して一括送信（1行目が消える現象を完全に防止）
                             grouped_billing_updates = {}
                             for _, row in update_b_rows.iterrows():
                                 r_id = clean_val(row.get("_recordId", ""))
@@ -1059,6 +1202,7 @@ if api_records:
                         "売上日": date_to_str(row.get("売上日")),
                         "受注番号": clean_val(row.get("受注番号", "")),
                         "品名": clean_val(row.get("品名", "")),
+                        "製本数": clean_val(row.get("製本数", "")),
                         "数量": clean_val(row.get("数量", "0")),
                         "販売単価": clean_val(row.get("販売単価", "0")),
                         "金額": clean_val(row.get("金額", "0")),
@@ -1075,7 +1219,8 @@ if api_records:
                 )
 
             with b_col_excel:
-                excel_billing_bytes = to_excel_bytes(edited_billing_df.drop(columns=["更新", "詳細", "_recordId", "_sub_89_id"], errors="ignore"))
+                excel_billing_df = edited_billing_df.drop(columns=["更新", "詳細", "_record_idx", "_recordId", "_sub_89_id"], errors="ignore")
+                excel_billing_bytes = to_excel_bytes(excel_billing_df, sheet_name="請求データ")
                 st.download_button(
                     label="📥 請求データ Excel ダウンロード",
                     data=excel_billing_bytes,
